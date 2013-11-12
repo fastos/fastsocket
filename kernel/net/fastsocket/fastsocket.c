@@ -847,10 +847,10 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 		if (!epi) {
 			epds.events |= POLLERR | POLLHUP;
 			DPRINTK(DEBUG, "Insert common socket %d\n", fd);
-			error = ep_insert(ep, &epds, tfile, fd);
+			error = ep_insert(ep, &epds, tfile, fd, 0);
 			if (sfile && !error) {
 				DPRINTK(DEBUG, "Insert spawned listen socket %d\n", fd);
-				error = ep_insert(ep, &epds, sfile, fd);
+				error = ep_insert(ep, &epds, sfile, fd, 0);
 			}
 		} else
 			error = -EEXIST;

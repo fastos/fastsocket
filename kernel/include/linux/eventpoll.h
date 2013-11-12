@@ -150,7 +150,7 @@ struct eventpoll {
 };
 
 extern int ep_remove(struct eventpoll *ep, struct epitem *epi);
-extern int ep_insert(struct eventpoll *ep, struct epoll_event *event, struct file *tfile, int fd);
+extern int ep_insert(struct eventpoll *ep, struct epoll_event *event, struct file *tfile, int fd, int full_check);
 extern int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event);
 extern struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd);
 
