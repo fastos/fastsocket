@@ -1,0 +1,8 @@
+config	FASTSOCKET
+	tristate "High performance socket interface (EXPERIMENTAL)"
+	default m
+	depends on INET
+	---help---
+	  This option enables high performance socket as its name suggests.
+
+	  Say m if unsure.
