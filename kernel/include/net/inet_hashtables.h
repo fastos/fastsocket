@@ -127,7 +127,7 @@ static inline struct net *ib_net(struct inet_bind_bucket *ib)
 struct inet_bind_hashbucket {
 	spinlock_t		lock;
 	struct hlist_head	chain;
-};
+}____cacheline_aligned_in_smp;
 
 /*
  * Sockets can be hashed in established or listening table
