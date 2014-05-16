@@ -43,7 +43,7 @@ __cacheline_aligned_in_smp DEFINE_SEQLOCK(rename_lock);
 
 EXPORT_SYMBOL(dcache_lock);
 
-static struct kmem_cache *dentry_cache __read_mostly;
+struct kmem_cache *dentry_cache __read_mostly;
 
 #define DNAME_INLINE_LEN (sizeof(struct dentry)-offsetof(struct dentry,d_iname))
 
@@ -212,10 +212,29 @@ static struct dentry *d_kill(struct dentry *dentry)
  * no dcache lock, please.
  */
 
+void dput_fastsocket(struct dentry *dentry)
+{
+	struct inode *inode;
+
+	if (!dentry || !atomic_dec_and_test(&dentry->d_count)) {
+		return;
+	}
+
+	inode = dentry->d_inode;
+	if (inode)
+		iput_fastsocket(inode);
+
+	d_free(dentry);
+}
+EXPORT_SYMBOL(dput_fastsocket);
+
 void dput(struct dentry *dentry)
 {
 	if (!dentry)
 		return;
+
+	if (dentry->d_flags & DCACHE_FASTSOCKET)
+		return dput_fastsocket(dentry);
 
 repeat:
 	if (atomic_read(&dentry->d_count) == 1)
@@ -2364,6 +2383,7 @@ void __init vfs_caches_init(unsigned long mempages)
 	chrdev_init();
 }
 
+EXPORT_SYMBOL(dentry_cache);
 EXPORT_SYMBOL(d_alloc);
 EXPORT_SYMBOL(d_alloc_root);
 EXPORT_SYMBOL(d_delete);

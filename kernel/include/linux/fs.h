@@ -102,6 +102,8 @@ struct inodes_stat_t {
 
 /* Expect random access pattern */
 #define FMODE_RANDOM		((__force fmode_t)4096)
+/* File for fastsocket */
+#define FMODE_FASTSOCKET	((__force fmode_t)8192)
 
 /*
  * The below are the various read and write types that we support. Some of
@@ -2387,6 +2389,7 @@ extern void inode_init_once(struct inode *);
 extern void inode_add_to_lists(struct super_block *, struct inode *);
 extern void ihold(struct inode * inode);
 extern void iput(struct inode *);
+extern void iput_fastsocket(struct inode *inode);
 extern struct inode * igrab(struct inode *);
 extern ino_t iunique(struct super_block *, ino_t);
 extern int inode_needs_sync(struct inode *inode);

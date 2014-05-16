@@ -46,10 +46,15 @@ int inline fsocket_get_dbg_level(void)
 }
 
 static struct kmem_cache *socket_cachep;
+extern struct kmem_cache *dentry_cache;
 
 static struct vfsmount *sock_mnt;
 
 static DEFINE_PER_CPU(int, fastsockets_in_use) = 0;
+
+extern int inet_create(struct net *net, struct socket *sock, int protocol, int kern);
+
+static inline int fsocket_filp_close(struct file *file);
 
 static inline void fsock_release_sock(struct socket *sock)
 {
@@ -119,6 +124,464 @@ static struct file_system_type fastsock_fs_type = {
 	.kill_sb = kill_anon_super,
 };
 
+static inline unsigned int fast_sock_poll(struct file *file, poll_table *wait)
+{
+	struct socket *sock;
+
+	sock = (struct socket *)file->private_data;
+	if (sock && sock->ops && sock->ops->poll)
+		return sock->ops->poll(file, sock, wait);
+
+	return -EINVAL;
+}
+
+static inline int fast_sock_close(struct inode *i_node, struct file *file)
+{
+	return fsocket_filp_close(file);
+}
+
+loff_t fast_sock_llseek(struct file *file, loff_t offset, int origin)
+{
+	return -ESPIPE;
+}
+
+static int fast_sock_open(struct inode *irrelevant, struct file *dontcare)
+{
+	return -ENXIO;
+}
+
+extern ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos);
+
+extern ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos);
+
+static inline ssize_t fast_sock_read(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos)
+{
+	ssize_t ret;
+	ret = sock_aio_read(iocb, iov, nr_segs, pos);
+	DPRINTK(DEBUG, "Read %ld\n", ret);
+	return ret;
+}
+
+static inline ssize_t fast_sock_write(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos)
+{
+	ssize_t ret;
+	ret = sock_aio_write(iocb, iov, nr_segs, pos);
+	DPRINTK(DEBUG, "Write %ld\n", ret);
+	return ret;
+}
+
+static inline long fast_sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+
+#ifdef CONFIG_COMPAT
+static inline long fast_compate_sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+#endif
+
+static inline int fast_sock_mmap(struct file *file, struct vm_area_struct *vma)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+
+static inline int fast_sock_fasync(int fd, struct file *filp, int on)
+{
+	DPRINTK(INFO, "Do!\n");
+	return -EINVAL;
+}
+
+extern ssize_t sock_sendpage(struct file *file, struct page *page,
+		int offset, size_t size, loff_t *ppos, int more);
+
+static inline ssize_t fast_sock_sendpage(struct file *file, struct page *page,
+		int offset, size_t size, loff_t *ppos, int more)
+{
+	ssize_t ret;
+	ret = sock_sendpage(file, page, offset, size, ppos, more);
+	DPRINTK(DEBUG, "Send page %ld\n", ret);
+	return ret;
+}
+
+extern ssize_t generic_splice_sendpage(struct pipe_inode_info *pipe,
+		struct file *out, loff_t *ppos, size_t len, unsigned int flags);
+extern ssize_t sock_splice_read(struct file *file, loff_t *ppos,
+		struct pipe_inode_info *pipe, size_t len, unsigned int flags);
+
+static inline ssize_t fast_sock_splice_write(struct pipe_inode_info *pipe,
+		struct file *out, loff_t *ppos, size_t len, unsigned int flags)
+{
+	ssize_t ret;
+	ret = generic_splice_sendpage(pipe, out, ppos, len, flags);
+	DPRINTK(DEBUG, "Splice wirte %ld\n", ret);
+	return ret;
+}
+
+static inline ssize_t fast_sock_splice_read(struct file *file, loff_t *ppos,
+		struct pipe_inode_info *pipe, size_t len, unsigned int flags)
+{
+	ssize_t ret;
+	ret = sock_splice_read(file, ppos, pipe, len, flags);
+	DPRINTK(DEBUG, "Splice read %ld\n", ret);
+	return ret;
+}
+
+static const struct file_operations socket_file_ops = {
+	.owner = 	THIS_MODULE,
+	.llseek =	fast_sock_llseek,
+	.aio_read = 	fast_sock_read,
+	.aio_write =	fast_sock_write,
+	.poll =		fast_sock_poll,
+	.unlocked_ioctl = fast_sock_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl = fast_compate_sock_ioctl,
+#endif
+	.mmap =		fast_sock_mmap,
+	.open =		fast_sock_open,	/* special open code to disallow open via /proc */
+	.release =	fast_sock_close,
+	.fasync =	fast_sock_fasync,
+	.sendpage =	fast_sock_sendpage,
+	.splice_write = fast_sock_splice_write,
+	.splice_read =	fast_sock_splice_read,
+};
+
+static char *fastsockfs_dynamic_dname(struct dentry *dentry, char *buffer, int buflen,
+			const char *fmt, ...)
+{
+	va_list args;
+	char temp[64];
+	int sz;
+
+	va_start(args, fmt);
+	sz = vsnprintf(temp, sizeof(temp), fmt, args) + 1;
+	va_end(args);
+
+	if (sz > sizeof(temp) || sz > buflen)
+		return ERR_PTR(-ENAMETOOLONG);
+
+	buffer += buflen - sz;
+	return memcpy(buffer, temp, sz);
+}
+
+static char *fastsockfs_dname(struct dentry *dentry, char *buffer, int buflen)
+{
+	return fastsockfs_dynamic_dname(dentry, buffer, buflen, "socket:[%lu]",
+				dentry->d_inode->i_ino);
+}
+
+static const struct dentry_operations fastsockfs_dentry_operations = {
+	.d_dname  = fastsockfs_dname,
+};
+
+static void __put_unused_fd(struct files_struct *files, unsigned int fd)
+{
+	struct fdtable *fdt = files_fdtable(files);
+	__FD_CLR(fd, fdt->open_fds);
+	if (fd < files->next_fd)
+		files->next_fd = fd;
+}
+
+static int __fsocket_filp_close(struct file *file)
+{
+	struct dentry *dentry = file->f_path.dentry;
+
+	if (atomic_long_dec_and_test(&file->f_count)) {
+
+		file->private_data = NULL;
+		file->f_path.dentry = NULL;
+		file->f_path.mnt = NULL;
+
+		put_empty_filp(file);
+
+		DPRINTK(DEBUG, "Free file 0x%p[%ld]\n", file, atomic_long_read(&file->f_count));
+
+		if (dentry) {
+			DPRINTK(DEBUG, "Release dentry 0x%p[%d]\n", dentry, atomic_read(&dentry->d_count));
+			DPRINTK(DEBUG, "Release inode 0x%p[%d]\n", dentry->d_inode, atomic_read(&dentry->d_inode->i_count));
+		} else {
+			EPRINTK_LIMIT(ERR, "No dentry for file 0x%p\n", file);
+			return 1;
+		}
+
+		dput(dentry);
+		return 0;
+
+	} else {
+		DPRINTK(DEBUG, "Next time to release file 0x%p[%ld]\n", file, atomic_long_read(&file->f_count));
+		return 1;
+	}
+}
+
+static inline int fsocket_filp_close(struct file *file)
+{
+	int retval;
+
+	DPRINTK(DEBUG, "Close file 0x%p\n", file);
+
+	retval = __fsocket_filp_close(file);
+
+	return 0;
+}
+
+static int fsocket_close(unsigned int fd)
+{
+	struct file *filp;
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	int retval = 0;
+
+	spin_lock(&files->file_lock);
+	fdt = files_fdtable(files);
+	if (fd >= fdt->max_fds)
+		goto out_unlock;
+	filp = fdt->fd[fd];
+	if (!filp)
+		goto out_unlock;
+	rcu_assign_pointer(fdt->fd[fd], NULL);
+	FD_CLR(fd, fdt->close_on_exec);
+	__put_unused_fd(files, fd);
+	spin_unlock(&files->file_lock);
+
+	retval = fsocket_filp_close(filp);
+
+	return retval;
+
+out_unlock:
+	spin_unlock(&files->file_lock);
+	return -EBADF;
+}
+
+#define FSOCKET_INODE_START	( 1 << 12 )
+
+static struct socket *fsocket_alloc_socket(void)
+{
+	struct socket *sock;
+	struct inode *inode = NULL;
+
+	//FIXME: Just guess this inode number is not something really matters.
+	static unsigned int last_ino = FSOCKET_INODE_START;
+
+	sock = (struct socket *)kmem_cache_alloc(socket_cachep, GFP_KERNEL);
+	if (sock != NULL) {
+		static const struct inode_operations empty_iops;
+		static const struct file_operations empty_fops;
+
+		if(!try_module_get(THIS_MODULE)) {
+			kmem_cache_free(socket_cachep, sock);
+			return NULL;
+		}
+
+		init_waitqueue_head(&sock->wait);
+
+		sock->fasync_list = NULL;
+		sock->state = SS_UNCONNECTED;
+		sock->flags = 0;
+		sock->ops = NULL;
+		sock->sk = NULL;
+		sock->file = NULL;
+
+		sock->type = 0;
+
+		inode = SOCK_INODE(sock);
+
+		inode->i_op = &empty_iops;
+		inode->i_fop = &empty_fops;
+		inode->i_sb = sock_mnt->mnt_sb;
+		atomic_set(&inode->i_count, 1);
+
+		INIT_LIST_HEAD(&inode->i_list);
+		INIT_LIST_HEAD(&inode->i_sb_list);
+
+		inode->i_ino = ++last_ino;
+		inode->i_state = 0;
+
+		kmemcheck_annotate_bitfield(sock, type);
+		inode->i_mode = S_IFSOCK | S_IRWXUGO;
+		inode->i_uid = current_fsuid();
+		inode->i_gid = current_fsgid();
+
+		percpu_add(fastsockets_in_use, 1);
+
+		DPRINTK(DEBUG, "Allocat inode 0x%p\n", inode);
+	}
+	return sock;
+}
+
+#define DNAME_INLINE_LEN (sizeof(struct dentry)-offsetof(struct dentry,d_iname))
+
+static void fsock_d_free(struct dentry *dentry)
+{
+	kmem_cache_free(dentry_cache, dentry);
+}
+
+static struct dentry *fsock_d_alloc(struct socket *sock, struct dentry *parent, const struct qstr *name)
+{
+	struct dentry *dentry;
+	char *dname;
+	struct inode *inode;
+
+	dentry = kmem_cache_alloc(dentry_cache, GFP_KERNEL);
+	if (!dentry)
+		return NULL;
+
+	DPRINTK(DEBUG, "\tAllocat dentry 0x%p\n", dentry);
+
+	if (name->len > DNAME_INLINE_LEN-1) {
+		dname = kmalloc(name->len + 1, GFP_KERNEL);
+		if (!dname)
+			return NULL;
+	} else {
+		dname = dentry->d_iname;
+	}
+
+	dentry->d_name.name = dname;
+
+	dentry->d_name.len = name->len;
+	dentry->d_name.hash = name->hash;
+	memcpy(dname, name->name, name->len);
+	dname[name->len] = 0;
+
+	atomic_set(&dentry->d_count, 1);
+	dentry->d_flags = DCACHE_UNHASHED;
+	spin_lock_init(&dentry->d_lock);
+	dentry->d_inode = NULL;
+	dentry->d_parent = NULL;
+	dentry->d_sb = NULL;
+	dentry->d_op = NULL;
+	dentry->d_fsdata = NULL;
+	INIT_HLIST_NODE(&dentry->d_hash);
+	INIT_LIST_HEAD(&dentry->d_lru);
+	INIT_LIST_HEAD(&dentry->d_subdirs);
+	INIT_LIST_HEAD(&dentry->d_alias);
+
+	INIT_LIST_HEAD(&dentry->d_u.d_child);
+
+	inode = SOCK_INODE(sock);
+
+	dentry->d_sb = inode->i_sb;
+	dentry->d_parent = NULL;
+	dentry->d_flags |= DCACHE_FASTSOCKET | DCACHE_DISCONNECTED;
+	dentry->d_inode = inode;
+
+	dentry->d_op = &fastsockfs_dentry_operations;
+
+	return dentry;
+}
+
+static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
+{
+	int fd;
+	struct qstr name = { .name = "" };
+	struct path path;
+	struct file *file;
+
+	fd = get_unused_fd_flags(flags);
+
+	if (unlikely(fd < 0)) {
+		EPRINTK_LIMIT(ERR, "Socket 0x%p get unused fd failed\n", sock);
+		return fd;
+	}
+
+	path.dentry = fsock_d_alloc(sock, NULL, &name);
+	if (unlikely(!path.dentry)) {
+		EPRINTK_LIMIT(ERR, "Socket 0x%p allocate dentry failed\n", sock);
+		put_unused_fd(fd);
+		return -ENOMEM;
+	}
+
+	path.mnt = sock_mnt;
+
+	SOCK_INODE(sock)->i_fop = &socket_file_ops;
+
+	file = get_empty_filp();
+	if (unlikely(!file)) {
+		EPRINTK_LIMIT(ERR, "Socket 0x%p allocate empty file failed\n", sock);
+		fsock_d_free(path.dentry);
+		put_unused_fd(fd);
+		return -ENFILE;
+	}
+
+	DPRINTK(DEBUG, "Allocate file 0x%p\n", file);
+
+	file->f_path = path;
+	file->f_mapping = path.dentry->d_inode->i_mapping;
+	file->f_mode = FMODE_READ | FMODE_WRITE | FMODE_FASTSOCKET;
+	file->f_op = &socket_file_ops;
+
+	sock->file = file;
+
+	file->f_flags = O_RDWR | (flags & O_NONBLOCK);
+	file->f_pos = 0;
+	file->private_data = sock;
+
+	*f = file;
+
+	return fd;
+}
+
+static int fsock_map_fd(struct socket *sock, int flags)
+{
+	struct file *newfile;
+
+	int fd = fsock_alloc_file(sock, &newfile, flags);
+	if (likely(fd >= 0))
+		fd_install(fd, newfile);
+
+	return fd;
+}
+
+static int fsocket_socket(int flags)
+{
+	struct socket *sock;
+
+	int err = 0;
+
+	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK)) {
+		EPRINTK_LIMIT(ERR, "Unsupported Socket Flags For Fastsocket\n");
+		err = -EINVAL;
+		goto out;
+	}
+
+	sock = fsocket_alloc_socket();
+	if (sock == NULL) {
+		EPRINTK_LIMIT(ERR, "Allocate New Socket failed\n");
+		err = -ENOMEM;
+		goto out;
+	}
+
+	sock->type = SOCK_STREAM;
+
+	err = inet_create(current->nsproxy->net_ns, sock, 0, 0);
+	if (err < 0) {
+		EPRINTK_LIMIT(ERR, "Initialize Inet Socket failed\n");
+		goto free_sock;
+	}
+
+	err = fsock_map_fd(sock, flags);
+	if (err < 0) {
+		EPRINTK_LIMIT(ERR, "Map Socket FD failed\n");
+		goto release_sock;
+	}
+
+	goto out;
+
+release_sock:
+	fsock_release_sock(sock);
+free_sock:
+	fsock_free_sock(sock);
+out:
+	return err;
+}
+
 static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 {
 	return -ENOSYS;
@@ -136,12 +599,62 @@ static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 
 static int fastsocket_socket(struct fsocket_ioctl_arg *u_arg)
 {
-	return -ENOSYS;
+	struct fsocket_ioctl_arg arg;
+	int family, type, protocol, fd;
+
+	DPRINTK(DEBUG,"Try to create fastsocket\n");
+
+	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
+		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+
+	family = arg.op.socket_op.family;
+	type = arg.op.socket_op.type;
+	protocol = arg.op.socket_op.protocol;
+
+	if (( family == AF_INET ) &&
+		((type & SOCK_TYPE_MASK) == SOCK_STREAM )) {
+		fd = fsocket_socket(type & ~SOCK_TYPE_MASK);
+		DPRINTK(DEBUG,"Create fastsocket %d\n", fd);
+		return fd;
+	} else {
+		fd = sys_socket(family, type, protocol);
+		DPRINTK(INFO, "Create non fastsocket %d\n", fd);
+		return fd;
+	}
 }
 
 static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 {
-	return -ENOSYS;
+	int error;
+	struct file *tfile;
+	struct fsocket_ioctl_arg arg;
+	int fput_need;
+
+	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
+		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+
+	DPRINTK(DEBUG,"Close fastsocket %d\n", arg.fd);
+
+	tfile = fget_light(arg.fd, &fput_need);
+	if (tfile == NULL) {
+		EPRINTK_LIMIT(ERR, "Close file don't exist!\n");
+		return -EINVAL;
+	}
+
+	if (tfile->f_mode & FMODE_FASTSOCKET) {
+		fput_light(tfile, fput_need);
+		error = fsocket_close(arg.fd);
+	} else {
+		fput_light(tfile, fput_need);
+		DPRINTK(INFO, "Close non fastsocket %d\n", arg.fd);
+		error = sys_close(arg.fd);
+	}
+
+	return error;
 }
 
 static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)

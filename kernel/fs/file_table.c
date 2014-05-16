@@ -148,6 +148,13 @@ fail_sec:
 fail:
 	return NULL;
 }
+EXPORT_SYMBOL(get_empty_filp);
+
+void put_empty_filp(struct file *file)
+{
+	file_free(file);
+}
+EXPORT_SYMBOL(put_empty_filp);
 
 /**
  * alloc_file - allocate and initialize a 'struct file'
@@ -318,6 +325,7 @@ struct file *fget_light(unsigned int fd, int *fput_needed)
 
 	return file;
 }
+EXPORT_SYMBOL(fget_light);
 
 
 void put_filp(struct file *file)

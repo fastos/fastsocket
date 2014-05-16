@@ -1363,6 +1363,17 @@ void iput(struct inode *inode)
 }
 EXPORT_SYMBOL(iput);
 
+void iput_fastsocket(struct inode *inode)
+{
+	if (inode && atomic_dec_and_test(&inode->i_count)) {
+		if (inode->i_sb && inode->i_sb->s_op && inode->i_sb->s_op->destroy_inode) {
+			inode->i_sb->s_op->destroy_inode(inode);
+			return;
+		}
+	}
+}
+EXPORT_SYMBOL(iput_fastsocket);
+
 /**
  *	bmap	- find a block number in a file
  *	@inode: inode of file

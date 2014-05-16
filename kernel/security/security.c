@@ -373,6 +373,7 @@ int security_inode_alloc(struct inode *inode)
 		security_inode_free(inode);
 	return ret;
 }
+EXPORT_SYMBOL(security_inode_alloc);
 
 void security_inode_free(struct inode *inode)
 {

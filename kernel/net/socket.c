@@ -410,7 +410,7 @@ int sock_map_fd(struct socket *sock, int flags)
 
 static struct socket *sock_from_file(struct file *file, int *err)
 {
-	if (file->f_op == &socket_file_ops)
+	if (file->f_mode & FMODE_FASTSOCKET || file->f_op == &socket_file_ops)
 		return file->private_data;	/* set in sock_map_fd */
 
 	*err = -ENOTSOCK;
@@ -774,7 +774,7 @@ static void sock_aio_dtor(struct kiocb *iocb)
 	kfree(iocb->private);
 }
 
-static ssize_t sock_sendpage(struct file *file, struct page *page,
+ssize_t sock_sendpage(struct file *file, struct page *page,
 			     int offset, size_t size, loff_t *ppos, int more)
 {
 	struct socket *sock;
@@ -788,8 +788,9 @@ static ssize_t sock_sendpage(struct file *file, struct page *page,
 
 	return kernel_sendpage(sock, page, offset, size, flags);
 }
+EXPORT_SYMBOL(sock_sendpage);
 
-static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
+ssize_t sock_splice_read(struct file *file, loff_t *ppos,
 			        struct pipe_inode_info *pipe, size_t len,
 				unsigned int flags)
 {
@@ -802,6 +803,7 @@ static ssize_t sock_splice_read(struct file *file, loff_t *ppos,
 
 	return sock->ops->splice_read(sock, ppos, pipe, len, flags);
 }
+EXPORT_SYMBOL(sock_splice_read);
 
 static struct sock_iocb *alloc_sock_iocb(struct kiocb *iocb,
 					 struct sock_iocb *siocb)
@@ -840,7 +842,7 @@ static ssize_t do_sock_read(struct msghdr *msg, struct kiocb *iocb,
 	return __sock_recvmsg(iocb, sock, msg, size, msg->msg_flags);
 }
 
-static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
+ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
 				unsigned long nr_segs, loff_t pos)
 {
 	struct sock_iocb siocb, *x;
@@ -857,6 +859,7 @@ static ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
 		return -ENOMEM;
 	return do_sock_read(&x->async_msg, iocb, iocb->ki_filp, iov, nr_segs);
 }
+EXPORT_SYMBOL(sock_aio_read);
 
 static ssize_t do_sock_write(struct msghdr *msg, struct kiocb *iocb,
 			struct file *file, const struct iovec *iov,
@@ -882,7 +885,7 @@ static ssize_t do_sock_write(struct msghdr *msg, struct kiocb *iocb,
 	return __sock_sendmsg(iocb, sock, msg, size);
 }
 
-static ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
+ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
 			  unsigned long nr_segs, loff_t pos)
 {
 	struct sock_iocb siocb, *x;
@@ -896,6 +899,7 @@ static ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
 
 	return do_sock_write(&x->async_msg, iocb, iocb->ki_filp, iov, nr_segs);
 }
+EXPORT_SYMBOL(sock_aio_write);
 
 /*
  * Atomic setting of ioctl hooks to avoid race
@@ -2696,6 +2700,7 @@ int kernel_sock_shutdown(struct socket *sock, enum sock_shutdown_cmd how)
 	return sock->ops->shutdown(sock, how);
 }
 
+EXPORT_SYMBOL(sys_socket);
 EXPORT_SYMBOL(sock_create);
 EXPORT_SYMBOL(sock_create_kern);
 EXPORT_SYMBOL(sock_create_lite);
