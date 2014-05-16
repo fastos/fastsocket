@@ -979,6 +979,9 @@ static void ep_ptable_queue_proc(struct file *file, wait_queue_head_t *whead,
 		init_waitqueue_func_entry(&pwq->wait, ep_poll_callback);
 		pwq->whead = whead;
 		pwq->base = epi;
+		if (file->f_mode & FMODE_SINGLE_WAKEUP) {
+			pwq->wait.flags |= WQ_FLAG_LOADBALANCE;
+		}
 		add_wait_queue(whead, &pwq->wait);
 		list_add_tail(&pwq->llink, &epi->pwqlist);
 		epi->nwait++;

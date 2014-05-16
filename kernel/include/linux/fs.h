@@ -104,6 +104,8 @@ struct inodes_stat_t {
 #define FMODE_RANDOM		((__force fmode_t)4096)
 /* File for fastsocket */
 #define FMODE_FASTSOCKET	((__force fmode_t)8192)
+/* Wake up the task in a round bobin way, used with fastsocket*/
+#define FMODE_SINGLE_WAKEUP	((__force fmode_t)16384)
 
 /*
  * The below are the various read and write types that we support. Some of
