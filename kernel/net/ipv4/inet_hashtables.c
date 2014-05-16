@@ -25,6 +25,10 @@
 #include <net/ip.h>
 
 #include <linux/log2.h>
+
+DEFINE_PER_CPU(struct inet_hash_stats, hash_stats);
+EXPORT_PER_CPU_SYMBOL(hash_stats);
+
 /*
  * Allocate and initialize a new local port bind bucket.
  * The bindhash mutex for snum's hash chain must be held here.
@@ -242,6 +246,9 @@ begin1:
 		}
 	}
 
+	if (result)
+		__get_cpu_var(hash_stats).local_listen_lookup++;
+
 	return result;
 }
 
@@ -300,6 +307,7 @@ begin:
 	 */
 	if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
 		goto begin;
+
 	if (result) {
 		if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
 			result = NULL;
@@ -335,6 +343,10 @@ begin1:
 		}
 	}
 	rcu_read_unlock();
+
+	if (result)
+		__get_cpu_var(hash_stats).global_listen_lookup++;
+
 	return result;
 }
 EXPORT_SYMBOL_GPL(__inet_lookup_listener);
@@ -537,6 +549,7 @@ static void __inet_hash(struct sock *sk)
 	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 	spin_unlock(&ilb->lock);
 
+		__get_cpu_var(hash_stats).global_listen_hash++;
 	} else {
 		struct inet_listen_hashtable *ilt;
 		int cpu;
@@ -553,6 +566,8 @@ static void __inet_hash(struct sock *sk)
 		__sk_nulls_add_node_rcu(sk, &ilb->head);
 		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 		spin_unlock(&ilb->lock);
+
+		__get_cpu_var(hash_stats).local_listen_hash++;
 	}
 }
 
@@ -579,6 +594,8 @@ void inet_unhash(struct sock *sk)
 		int hash = inet_sk_listen_hashfn(sk);
 		if (!sk->sk_cpumask) {
 			lock = &hashinfo->listening_hash[hash].lock;
+
+			__get_cpu_var(hash_stats).global_listen_unhash++;
 		} else {
 			struct inet_listen_hashbucket *ilb;
 			struct inet_listen_hashtable *ilt;
@@ -592,6 +609,8 @@ void inet_unhash(struct sock *sk)
 			ilb = &ilt->listening_hash[hash];
 
 			lock = &ilb->lock;
+
+			__get_cpu_var(hash_stats).local_listen_unhash++;
 		}
 	}
 	else
@@ -844,9 +863,124 @@ int inet_hash_connect(struct inet_timewait_death_row *death_row,
 
 EXPORT_SYMBOL_GPL(inet_hash_connect);
 
+static volatile unsigned cpu_id;
+
+static struct inet_hash_stats *get_online(loff_t *pos)
+{
+	struct inet_hash_stats *rc = NULL;
+
+	while (*pos < nr_cpu_ids)
+		if (cpu_online(*pos)) {
+			rc = &per_cpu(hash_stats, *pos);
+			break;
+		} else
+			++*pos;
+	cpu_id = *pos;
+
+	return rc;
+}
+
+static void *hash_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	++*pos;
+	return get_online(pos);
+}
+
+static void hash_seq_stop(struct seq_file *seq, void *v)
+{
+
+}
+
+static void *hash_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s\n",
+		"CPU", "Loc_lst_lookup", "Glo_lst_lookup",
+		"Com_accetp", "Com_accept_F", "Loc_accept",
+		"Loc_accept_F", "Loc_accept_A", "Glo_accept",
+		"Glo_accept_F", "Glo_accept_A");
+
+	cpu_id = 0;
+
+	return get_online(pos);
+}
+
+static int hash_seq_show(struct seq_file *seq, void *v)
+{
+	struct inet_hash_stats *s = v;
+
+	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu\n",
+		cpu_id, s->local_listen_lookup, s->global_listen_lookup,
+		s->common_accept, s->common_accept_failed, s->local_accept,
+		s->local_accept_failed, s->local_accept_again, s->global_accept,
+		s->global_accept_failed, s->global_accept_again);
+
+	return 0;
+}
+static const struct seq_operations hash_seq_ops = {
+	.start = hash_seq_start,
+	.next  = hash_seq_next,
+	.stop  = hash_seq_stop,
+	.show  = hash_seq_show,
+};
+
+static int hash_seq_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &hash_seq_ops);
+}
+
+ssize_t hash_reset(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu)
+		memset(&per_cpu(hash_stats, cpu), 0, sizeof(struct inet_hash_stats));
+
+	return 1;
+}
+
+static const struct file_operations hash_seq_fops = {
+	.owner	 = THIS_MODULE,
+	.open    = hash_seq_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release,
+	.write   = hash_reset,
+};
+
+static int __net_init inet_hash_proc_net_init(struct net *net)
+{
+	int rc = -ENOMEM;
+
+	if (!proc_net_fops_create(net, "hash_stat", S_IRUGO, &hash_seq_fops))
+		goto out;
+
+	rc = 0;
+
+out:
+	return rc;
+}
+
+static void __net_exit inet_hash_proc_net_exit(struct net *net)
+{
+	proc_net_remove(net, "hash_stat");
+}
+
+
+static struct pernet_operations __net_initdata inet_hash_proc_ops = {
+	.init = inet_hash_proc_net_init,
+	.exit = inet_hash_proc_net_exit,
+};
+
+static int inet_hash_proc_init(void)
+{
+	return register_pernet_subsys(&inet_hash_proc_ops);
+}
+
 void inet_hashinfo_init(struct inet_hashinfo *h)
 {
 	int i;
+
+	inet_hash_proc_init();
 
 	atomic_set(&h->bsockets, 0);
 	h->local_listening_hash = alloc_percpu(struct inet_listen_hashtable);

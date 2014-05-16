@@ -1109,11 +1109,21 @@ static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 	return ret;
 }
 
+DECLARE_PER_CPU(struct inet_hash_stats, hash_stats);
+
 static inline int fsocket_common_accept(struct socket *sock, struct socket *newsock, int flags)
 {
 	int ret;
 
 	ret =  sock->ops->accept(sock, newsock, flags);
+	if (!ret)
+		__get_cpu_var(hash_stats).common_accept++;
+	else {
+		if (ret != -EAGAIN)
+			__get_cpu_var(hash_stats).common_accept_failed++;
+		else
+			__get_cpu_var(hash_stats).common_accept_again++;
+	}
 	return ret;
 }
 
@@ -1122,6 +1132,14 @@ static inline int fsocket_local_accept(struct socket *sock, struct socket *newso
 	int ret;
 
 	ret = sock->ops->accept(sock, newsock, flags);
+	if (!ret)
+		__get_cpu_var(hash_stats).local_accept++;
+	else {
+		if (unlikely(ret != -EAGAIN))
+			__get_cpu_var(hash_stats).local_accept_failed++;
+		else
+			__get_cpu_var(hash_stats).local_accept_again++;
+	}
 	return ret;
 }
 
@@ -1139,6 +1157,14 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 	//FIXME: Is the policy good?
 	if (fsocket_need_global_accept()) {
 		ret = sock->ops->accept(sock, newsock, flags);
+		if (!ret)
+			__get_cpu_var(hash_stats).global_accept++;
+		else {
+			if (ret != -EAGAIN)
+				__get_cpu_var(hash_stats).global_accept_failed++;
+			else
+				__get_cpu_var(hash_stats).global_accept_again++;
+		}
 		return ret;
 	}
 	return -EAGAIN;
