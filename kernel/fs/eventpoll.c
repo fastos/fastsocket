@@ -39,6 +39,8 @@
 #include <asm/mman.h>
 #include <asm/atomic.h>
 
+#include <linux/module.h>
+
 /*
  * LOCKING:
  * There are three level of locking required by epoll :
@@ -819,6 +821,8 @@ void eventpoll_release_file(struct file *file)
 
 	mutex_unlock(&epmutex);
 }
+
+EXPORT_SYMBOL(eventpoll_release_file);
 
 static int ep_alloc(struct eventpoll **pep)
 {
@@ -1701,6 +1705,8 @@ error_return:
 
 	return error;
 }
+
+EXPORT_SYMBOL(sys_epoll_ctl);
 
 /*
  * Implement the event wait interface for the eventpoll file. It is the kernel

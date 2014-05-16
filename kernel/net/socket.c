@@ -236,6 +236,7 @@ int move_addr_to_user(struct sockaddr *kaddr, int klen, void __user *uaddr,
 	 */
 	return __put_user(klen, ulen);
 }
+EXPORT_SYMBOL(move_addr_to_user);
 
 static struct kmem_cache *sock_inode_cachep __read_mostly;
 
@@ -2700,6 +2701,8 @@ int kernel_sock_shutdown(struct socket *sock, enum sock_shutdown_cmd how)
 	return sock->ops->shutdown(sock, how);
 }
 
+EXPORT_SYMBOL(sys_accept);
+EXPORT_SYMBOL(sys_listen);
 EXPORT_SYMBOL(sys_socket);
 EXPORT_SYMBOL(sock_create);
 EXPORT_SYMBOL(sock_create_kern);

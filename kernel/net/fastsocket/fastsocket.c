@@ -296,6 +296,8 @@ static int __fsocket_filp_close(struct file *file)
 
 	if (atomic_long_dec_and_test(&file->f_count)) {
 
+		eventpoll_release(file);
+
 		file->private_data = NULL;
 		file->f_path.dentry = NULL;
 		file->f_path.mnt = NULL;
@@ -587,14 +589,145 @@ static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 	return -ENOSYS;
 }
 
+static inline int fsocket_common_accept(struct socket *sock, struct socket *newsock, int flags)
+{
+	int ret;
+
+	ret =  sock->ops->accept(sock, newsock, flags);
+	return ret;
+}
+
+static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
+		int __user *upeer_addrlen, int flags)
+{
+	int err = 0, newfd, len;
+	struct socket *sock, *newsock;
+	struct sockaddr_storage address;
+	struct file *newfile;
+
+	//FIXME: Maybe unsafe for CLOEXEC flag
+	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK)) {
+		EPRINTK_LIMIT(ERR, "Unsupported flags for file 0x%p\n", file);
+		err = -EINVAL;
+		goto out;
+	}
+
+	sock = (struct socket *)file->private_data;
+	if (!sock) {
+		EPRINTK_LIMIT(ERR, "No socket for file 0x%p\n", file);
+		err = -EBADF;
+		goto out;
+	}
+
+	DPRINTK(DEBUG, "Accept file 0x%p\n", file);
+
+	if (!(newsock = fsocket_alloc_socket())) {
+		EPRINTK_LIMIT(ERR, "Allocate empty socket failed\n");
+		err = -ENOMEM;
+		goto out;
+	}
+
+	newsock->type = SOCK_STREAM;
+	newsock->ops = sock->ops;
+
+	newfd = fsock_alloc_file(newsock, &newfile, O_NONBLOCK | flags);
+	if (unlikely(newfd < 0)) {
+		EPRINTK_LIMIT(ERR, "Allocate file for new socket failed\n");
+		err = newfd;
+		fsock_free_sock(newsock);
+		goto out;
+	}
+
+	err = fsocket_common_accept(sock, newsock, O_NONBLOCK);
+
+	if (err < 0) {
+		if (err != -EAGAIN)
+			EPRINTK_LIMIT(ERR, "Accept failed [%d]\n", err);
+		goto out_fd;
+	}
+
+	if (upeer_sockaddr) {
+		if (newsock->ops->getname(newsock, (struct sockaddr *)&address, &len, 2) < 0) {
+			EPRINTK_LIMIT(ERR, "Getname failed for accepted socket\n");
+			err = -ECONNABORTED;
+			goto out_fd;
+		}
+
+		err = move_addr_to_user((struct sockaddr *)&address, len, upeer_sockaddr, upeer_addrlen);
+		if (err < 0)
+			goto out_fd;
+	}
+
+	fd_install(newfd, newfile);
+	err = newfd;
+
+	DPRINTK(DEBUG, "Accept file 0x%p new fd %d\n", file, newfd);
+
+	goto out;
+
+out_fd:
+	__fsocket_filp_close(newfile);
+	put_unused_fd(newfd);
+out:
+	return err;
+}
+
 int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
 {
-	return -ENOSYS;
+	int ret;
+	struct fsocket_ioctl_arg arg;
+	struct file *tfile;
+	int fput_need;
+
+	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
+		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+
+	tfile =	fget_light(arg.fd, &fput_need);
+	if (tfile == NULL) {
+		EPRINTK_LIMIT(ERR, "Accept file don't exist!\n");
+		return -ENOENT;
+	}
+
+	if (tfile->f_mode & FMODE_FASTSOCKET) {
+		DPRINTK(DEBUG, "Accept fastsocket %d\n", arg.fd);
+		ret = fsocket_spawn_accept(tfile, arg.op.accept_op.sockaddr,
+				arg.op.accept_op.sockaddr_len, arg.op.accept_op.flags);
+	} else {
+		DPRINTK(INFO, "Accept non-fastsocket %d\n", arg.fd);
+		ret = sys_accept(arg.fd, arg.op.accept_op.sockaddr, arg.op.accept_op.sockaddr_len);
+	}
+	fput_light(tfile, fput_need);
+
+	return ret;
 }
 
 static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 {
-	return -ENOSYS;
+	struct fsocket_ioctl_arg arg;
+	struct file *tfile;
+	int fd, backlog, ret, fput_needed;
+
+	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
+		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+
+	fd = arg.fd;
+	backlog = arg.backlog;
+
+	tfile = fget_light(fd, &fput_needed);
+	if (tfile == NULL) {
+		EPRINTK_LIMIT(ERR, "fd [%d] file doesn't exist!\n", fd);
+		return -EINVAL;
+	}
+
+	ret = sys_listen(fd, backlog);
+
+	fput_light(tfile, fput_needed);
+
+	return ret;
 }
 
 static int fastsocket_socket(struct fsocket_ioctl_arg *u_arg)
@@ -659,7 +792,19 @@ static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 
 static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 {
-	return -ENOSYS;
+	struct fsocket_ioctl_arg arg;
+	int ret;
+
+	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
+		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+
+	DPRINTK(DEBUG, "Epoll_ctl socket %d[%d]\n", arg.fd, arg.op.epoll_op.ep_ctl_cmd);
+
+	ret = sys_epoll_ctl(arg.op.epoll_op.epoll_fd, arg.op.epoll_op.ep_ctl_cmd,
+			    arg.fd, arg.op.epoll_op.ev);
+	return ret;
 }
 
 static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
