@@ -189,6 +189,15 @@ struct neighbour;
 struct neigh_parms;
 struct sk_buff;
 
+struct netif_deliver_stats
+{
+	unsigned long pass;
+	unsigned long steer;
+	unsigned long steer_done;
+	unsigned long steer_save;
+	unsigned long steer_err;
+};
+
 struct netif_rx_stats
 {
 	unsigned total;

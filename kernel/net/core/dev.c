@@ -3414,6 +3414,8 @@ out:
 	return ret;
 }
 
+static DEFINE_PER_CPU(struct netif_deliver_stats, deliver_stats);
+
 static int netif_deliver_cpu(unsigned short dport)
 {
 	int cur_cpu = smp_processor_id();
@@ -3423,6 +3425,7 @@ static int netif_deliver_cpu(unsigned short dport)
 
 	unsigned int mask;
 
+	__get_cpu_var(deliver_stats).steer++;
 	round_cpu_num = cpu_num;
 
 	if (!is_power_of_2(cpu_num))
@@ -3431,10 +3434,16 @@ static int netif_deliver_cpu(unsigned short dport)
 	mask = round_cpu_num - 1;
 	new_cpu = dport & mask;
 
-	if (new_cpu >= cpu_num)
+	if (new_cpu >= cpu_num) {
+		__get_cpu_var(deliver_stats).steer_err++;
 		return -1;
-	if (new_cpu == cur_cpu)
+	}
+	if (new_cpu == cur_cpu) {
+		__get_cpu_var(deliver_stats).steer_save++;
 		return -1;
+	}
+
+	__get_cpu_var(deliver_stats).steer_done++;
 
 	return new_cpu;
 }
@@ -3458,16 +3467,20 @@ static int netif_deliver_skb(struct sk_buff *skb)
 			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
 			struct sock *sk;
 
-			if (ntohs(th->source) < RESERVED_SERVICE_PORT)
+			if (ntohs(th->source) < RESERVED_SERVICE_PORT) {
 				return netif_deliver_cpu(ntohs(th->dest));
+			}
 
-			if (ntohs(th->dest) < RESERVED_SERVICE_PORT)
+			if (ntohs(th->dest) < RESERVED_SERVICE_PORT) {
+				__get_cpu_var(deliver_stats).pass++;
 				return -1;
+			}
 
 			sk = __inet_lookup_listener(&init_net, &tcp_hashinfo, iph->saddr, th->source, iph->daddr, ntohs(th->dest), skb->dev->ifindex);
 
 			if (sk) {
 				skb->sk = sk;
+				__get_cpu_var(deliver_stats).pass++;
 				return -1;
 			} else {
 			//FIXME: Should we lookup established table to make sure?
@@ -4547,6 +4560,83 @@ static const struct file_operations ptype_seq_fops = {
 	.release = seq_release_net,
 };
 
+static volatile unsigned steer_cpu_id;
+
+static struct netif_deliver_stats *steer_get_online(loff_t *pos)
+{
+	struct netif_deliver_stats *rc = NULL;
+
+	while (*pos < nr_cpu_ids)
+		if (cpu_online(*pos)) {
+			rc = &per_cpu(deliver_stats, *pos);
+			break;
+		} else
+			++*pos;
+	steer_cpu_id = *pos;
+
+	return rc;
+}
+
+static void *steer_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	++*pos;
+	return steer_get_online(pos);
+}
+
+static void steer_seq_stop(struct seq_file *seq, void *v)
+{
+}
+
+static void *steer_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s\n",
+		"CPU", "Pass_total", "Steer_total", "Steer_remote", "Steer_local", "Steer_error");
+
+	steer_cpu_id = 0;
+
+	return steer_get_online(pos);
+}
+
+static int steer_seq_show(struct seq_file *seq, void *v)
+{
+	struct netif_deliver_stats *s = v;
+
+	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu\n",
+		steer_cpu_id, s->pass, s->steer, s->steer_done, s->steer_save, s->steer_err);
+
+	return 0;
+}
+
+static const struct seq_operations steer_seq_ops = {
+	.start = steer_seq_start,
+	.next  = steer_seq_next,
+	.stop  = steer_seq_stop,
+	.show  = steer_seq_show,
+};
+
+static int steer_seq_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &steer_seq_ops);
+}
+
+ssize_t steer_reset(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu)
+		memset(&per_cpu(deliver_stats, cpu), 0, sizeof(struct netif_deliver_stats));
+
+	return 1;
+}
+
+static const struct file_operations steer_seq_fops = {
+	.owner	 = THIS_MODULE,
+	.open    = steer_seq_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release,
+	.write   = steer_reset,
+};
 
 static int __net_init dev_proc_net_init(struct net *net)
 {
@@ -4559,11 +4649,16 @@ static int __net_init dev_proc_net_init(struct net *net)
 	if (!proc_net_fops_create(net, "ptype", S_IRUGO, &ptype_seq_fops))
 		goto out_softnet;
 
-	if (wext_proc_init(net))
+	if (!proc_net_fops_create(net, "steer_stat", S_IRUGO, &steer_seq_fops))
 		goto out_ptype;
+
+	if (wext_proc_init(net))
+		goto out_steer;
 	rc = 0;
 out:
 	return rc;
+out_steer:
+	proc_net_remove(net, "steer_stat");
 out_ptype:
 	proc_net_remove(net, "ptype");
 out_softnet:
@@ -4577,6 +4672,7 @@ static void __net_exit dev_proc_net_exit(struct net *net)
 {
 	wext_proc_exit(net);
 
+	proc_net_remove(net, "steer_stat");
 	proc_net_remove(net, "ptype");
 	proc_net_remove(net, "softnet_stat");
 	proc_net_remove(net, "dev");
