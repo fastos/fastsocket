@@ -138,6 +138,9 @@
 
 #include "net-sysfs.h"
 
+#include <linux/log2.h>
+#include <net/tcp.h>
+
 /* Instead of increasing this, you should create a hash table. */
 #define MAX_GRO_SKBS 8
 
@@ -3411,6 +3414,71 @@ out:
 	return ret;
 }
 
+static int netif_deliver_cpu(unsigned short dport)
+{
+	int cur_cpu = smp_processor_id();
+	int cpu_num = num_active_cpus();
+	int new_cpu;
+	int round_cpu_num;
+
+	unsigned int mask;
+
+	round_cpu_num = cpu_num;
+
+	if (!is_power_of_2(cpu_num))
+		round_cpu_num = roundup_pow_of_two(cpu_num);
+
+	mask = round_cpu_num - 1;
+	new_cpu = dport & mask;
+
+	if (new_cpu >= cpu_num)
+		return -1;
+	if (new_cpu == cur_cpu)
+		return -1;
+
+	return new_cpu;
+}
+
+#define RESERVED_SERVICE_PORT	1024
+
+static int netif_deliver_skb(struct sk_buff *skb)
+{
+	if (skb->protocol != htons(ETH_P_IP))
+		return -1;
+
+	if (pskb_may_pull(skb, sizeof(struct iphdr))) {
+		struct iphdr *iph = (struct iphdr *)skb->data;
+		int iphl = iph->ihl;
+		u8 ip_proto = iph->protocol;
+
+		if (ip_proto != IPPROTO_TCP)
+			return -1;
+
+		if (pskb_may_pull(skb, (iphl * 4) + sizeof(struct tcphdr))) {
+			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
+			struct sock *sk;
+
+			if (ntohs(th->source) < RESERVED_SERVICE_PORT)
+				return netif_deliver_cpu(ntohs(th->dest));
+
+			if (ntohs(th->dest) < RESERVED_SERVICE_PORT)
+				return -1;
+
+			sk = __inet_lookup_listener(&init_net, &tcp_hashinfo, iph->saddr, th->source, iph->daddr, ntohs(th->dest), skb->dev->ifindex);
+
+			if (sk) {
+				skb->sk = sk;
+				return -1;
+			} else {
+			//FIXME: Should we lookup established table to make sure?
+				return netif_deliver_cpu(ntohs(th->dest));
+			}
+		}
+	}
+
+	return -1;
+}
+
 /**
  *	netif_receive_skb - process receive buffer from network
  *	@skb: buffer to process
@@ -3426,11 +3494,18 @@ out:
  *	NET_RX_SUCCESS: no congestion
  *	NET_RX_DROP: packet was dropped
  */
+
+int enable_receive_flow_deliver = 0;
+EXPORT_SYMBOL(enable_receive_flow_deliver);
+
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int cpu, ret;
 
+	if (enable_receive_flow_deliver)
+		cpu = netif_deliver_skb(skb);
+	else
 	cpu = get_rps_cpu(skb->dev, skb, &rflow);
 
 	if (cpu >= 0)

@@ -36,12 +36,15 @@ MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel perf
 
 static int enable_fastsocket_debug = 3;
 static int enable_listen_spawn = 2;
+extern int enable_receive_flow_deliver;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
+module_param(enable_receive_flow_deliver, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
+MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled");
 
 int inline fsocket_get_dbg_level(void)
 {
@@ -1497,6 +1500,8 @@ static int __init  fastsocket_init(void)
 
 	if (enable_listen_spawn)
 		printk(KERN_INFO "Fastsocket: Enable Listen Spawn[Mode-%d]\n", enable_listen_spawn);
+	if (enable_receive_flow_deliver)
+		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
 
 	return ret;
 }
@@ -1511,6 +1516,12 @@ static void __exit fastsocket_exit(void)
 	unregister_filesystem(&fastsock_fs_type);
 
 	kmem_cache_destroy(socket_cachep);
+
+	if (enable_receive_flow_deliver) {
+		enable_receive_flow_deliver = 0;
+		printk(KERN_INFO "Fastsocket: Disable Recieve Flow Deliver\n");
+	}
+
 
 	printk(KERN_INFO "Fastsocket: Remove Module\n");
 }
