@@ -106,6 +106,9 @@ struct inodes_stat_t {
 #define FMODE_FASTSOCKET	((__force fmode_t)8192)
 /* Wake up the task in a round bobin way, used with fastsocket*/
 #define FMODE_SINGLE_WAKEUP	((__force fmode_t)16384)
+/* Bind epoll item with file, used with fastsocket */
+#define FMODE_BIND_EPI		((__force fmode_t)32768)
+
 
 /*
  * The below are the various read and write types that we support. Some of
@@ -991,6 +994,7 @@ struct file {
 	} f_u;
 	struct file 		*sub_file;
 	struct file 		*old_file;
+	struct epitem		*f_epi;
 	struct path		f_path;
 #define f_dentry	f_path.dentry
 #define f_vfsmnt	f_path.mnt

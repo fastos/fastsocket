@@ -647,6 +647,10 @@ int ep_remove(struct eventpoll *ep, struct epitem *epi)
 	unsigned long flags;
 	struct file *file = epi->ffd.file;
 
+	if (file->f_mode & FMODE_BIND_EPI) {
+		file->f_epi = NULL;
+	}
+
 	/*
 	 * Removes poll wait queue hooks. We _have_ to do this without holding
 	 * the "ep->lock" otherwise a deadlock might occur. This because of the
@@ -1136,6 +1140,10 @@ int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	epi->event = *event;
 	epi->nwait = 0;
 	epi->next = EP_UNACTIVE_PTR;
+
+	if (tfile->f_mode & FMODE_BIND_EPI) {
+		tfile->f_epi = epi;
+	}
 
 	/* Initialize the poll table using the queue callback */
 	epq.epi = epi;
@@ -1686,6 +1694,10 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	 * above, we can be sure to be able to use the item looked up by
 	 * ep_find() till we release the mutex.
 	 */
+
+	if (tfile->f_mode & FMODE_BIND_EPI)
+		epi = tfile->f_epi;
+	else
 	epi = ep_find(ep, tfile, fd);
 
 	error = -EINVAL;
