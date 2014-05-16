@@ -151,6 +151,7 @@ static inline int compute_score(struct sock *sk, struct net *net,
 {
 	int score = -1;
 	struct inet_sock *inet = inet_sk(sk);
+	int processor_id = smp_processor_id();
 
 	if (net_eq(sock_net(sk), net) && inet->num == hnum &&
 			!ipv6_only_sock(sk)) {
@@ -166,9 +167,83 @@ static inline int compute_score(struct sock *sk, struct net *net,
 				return -1;
 			score += 4;
 		}
+
+		if (sk->sk_cpumask == 0)
+			score++;
+
+		if (sk->sk_cpumask & ((unsigned long)1 << processor_id))
+			score += 2;
 	}
 	return score;
 }
+
+static struct sock * __inet_lookup_local_listener(struct net *net,
+					   struct inet_hashinfo *hashinfo,
+					   const __be32 daddr, const unsigned short hum,
+					   const int dif)
+{
+	struct sock *sk, *result;
+	struct hlist_nulls_node *node;
+	unsigned int hash = inet_lhashfn_ex(net, daddr, hum);
+	struct inet_listen_hashtable *ilt = per_cpu_ptr(hashinfo->local_listening_hash, smp_processor_id());
+	struct inet_listen_hashbucket *ilb = &ilt->listening_hash[hash];
+	int score, hiscore;
+
+begin:
+	result = NULL;
+	hiscore = -1;
+	sk_nulls_for_each(sk, node, &ilb->head) {
+		score = compute_score(sk, net, hum, daddr, dif);
+		if (score > hiscore) {
+			result = sk;
+			hiscore = score;
+		}
+	}
+	/*
+	 * if the nulls value we got at the end of this lookup is
+	 * not the expected one, we must restart lookup.
+	 * We probably met an item that was moved to another chain.
+	 */
+	if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
+		goto begin;
+	if (result) {
+		if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
+			result = NULL;
+		else if (unlikely(compute_score(result, net, hum, daddr,
+				  dif) < hiscore)) {
+			sock_put(result);
+			goto begin;
+		}
+	} else {
+		hash = inet_lhashfn_ex(net, 0, hum);
+		ilb = &ilt->listening_hash[hash];
+begin1:
+		result = NULL;
+		hiscore = -1;
+		sk_nulls_for_each(sk, node, &ilb->head) {
+			score = compute_score(sk, net, hum, daddr, dif);
+			if (score > hiscore) {
+				result = sk;
+				hiscore = score;
+			}
+		}
+		if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
+			goto begin1;
+
+		if (result) {
+			if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
+				result = NULL;
+			else if (unlikely(compute_score(result, net, hum, daddr,
+					  dif) < hiscore)) {
+				sock_put(result);
+				goto begin1;
+			}
+		}
+	}
+
+	return result;
+}
+
 
 /*
  * Don't inline this cruft. Here are some nice properties to exploit here. The
@@ -186,10 +261,14 @@ struct sock *__inet_lookup_listener(struct net *net,
 {
 	struct sock *sk, *result;
 	struct hlist_nulls_node *node;
-	unsigned int hash = inet_lhashfn(net, hnum);
+	unsigned int hash = inet_lhashfn_ex(net, daddr, hnum);
 	struct inet_listen_hashbucket *ilb = &hashinfo->listening_hash[hash];
 	int score, hiscore, matches = 0, reuseport = 0;
 	u32 phash = 0;
+
+	result = __inet_lookup_local_listener(net, hashinfo, daddr, hnum, dif);
+	if (result)
+		return result;
 
 	rcu_read_lock();
 begin:
@@ -227,6 +306,31 @@ begin:
 				  dif) < hiscore)) {
 			sock_put(result);
 			goto begin;
+		}
+	} else {
+		hash = inet_lhashfn_ex(net, 0, hnum);
+		ilb = &hashinfo->listening_hash[hash];
+begin1:
+		result = NULL;
+		hiscore = -1;
+		sk_nulls_for_each_rcu(sk, node, &ilb->head) {
+			score = compute_score(sk, net, hnum, daddr, dif);
+			if (score > hiscore) {
+				result = sk;
+				hiscore = score;
+			}
+		}
+		if (get_nulls_value(node) != hash + LISTENING_NULLS_BASE)
+			goto begin1;
+
+		if (result) {
+			if (unlikely(!atomic_inc_not_zero(&result->sk_refcnt)))
+				result = NULL;
+			else if (unlikely(compute_score(result, net, hnum, daddr,
+					  dif) < hiscore)) {
+				sock_put(result);
+				goto begin1;
+			}
 		}
 	}
 	rcu_read_unlock();
@@ -413,6 +517,7 @@ static void __inet_hash(struct sock *sk)
 {
 	struct inet_hashinfo *hashinfo = sk->sk_prot->h.hashinfo;
 	struct inet_listen_hashbucket *ilb;
+	int hash;
 
 	if (sk->sk_state != TCP_LISTEN) {
 		__inet_hash_nolisten(sk);
@@ -420,12 +525,34 @@ static void __inet_hash(struct sock *sk)
 	}
 
 	WARN_ON(!sk_unhashed(sk));
-	ilb = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)];
+
+	hash = inet_sk_listen_hashfn(sk);
+
+	if (!sk->sk_cpumask) {
+		ilb = &hashinfo->listening_hash[hash];
 
 	spin_lock(&ilb->lock);
 	__sk_nulls_add_node_rcu(sk, &ilb->head);
 	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
 	spin_unlock(&ilb->lock);
+
+	} else {
+		struct inet_listen_hashtable *ilt;
+		int cpu;
+
+		for_each_possible_cpu(cpu) {
+			if (sk->sk_cpumask & ((unsigned long)1 << cpu))
+				break;
+		}
+
+		ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);
+		ilb = &ilt->listening_hash[hash];
+
+		spin_lock(&ilb->lock);
+		__sk_nulls_add_node_rcu(sk, &ilb->head);
+		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+		spin_unlock(&ilb->lock);
+	}
 }
 
 void inet_hash(struct sock *sk)
@@ -447,8 +574,25 @@ void inet_unhash(struct sock *sk)
 	if (sk_unhashed(sk))
 		return;
 
-	if (sk->sk_state == TCP_LISTEN)
-		lock = &hashinfo->listening_hash[inet_sk_listen_hashfn(sk)].lock;
+	if (sk->sk_state == TCP_LISTEN) {
+		int hash = inet_sk_listen_hashfn(sk);
+		if (!sk->sk_cpumask) {
+			lock = &hashinfo->listening_hash[hash].lock;
+		} else {
+			struct inet_listen_hashbucket *ilb;
+			struct inet_listen_hashtable *ilt;
+			int cpu;
+
+			for_each_possible_cpu(cpu) {
+				if (sk->sk_cpumask & ((unsigned long)1 << cpu))
+					break;
+			}
+			ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);
+			ilb = &ilt->listening_hash[hash];
+
+			lock = &ilb->lock;
+		}
+	}
 	else
 		lock = inet_ehash_lockp(hashinfo, sk->sk_hash);
 
@@ -580,6 +724,22 @@ void inet_hashinfo_init(struct inet_hashinfo *h)
 	int i;
 
 	atomic_set(&h->bsockets, 0);
+	h->local_listening_hash = alloc_percpu(struct inet_listen_hashtable);
+
+	/*
+	 * Initialise local listening hash
+	 */
+	for_each_possible_cpu(i) {
+		struct inet_listen_hashtable *ilt = per_cpu_ptr(h->local_listening_hash, i);
+		int k;
+
+		for (k = 0; k < INET_LHTABLE_SIZE; k++) {
+			spin_lock_init(&ilt->listening_hash[k].lock);
+			INIT_HLIST_NULLS_HEAD(&ilt->listening_hash[k].head,
+					      k + LISTENING_NULLS_BASE);
+		}
+	}
+
 	for (i = 0; i < INET_LHTABLE_SIZE; i++) {
 		spin_lock_init(&h->listening_hash[i].lock);
 		INIT_HLIST_NULLS_HEAD(&h->listening_hash[i].head,

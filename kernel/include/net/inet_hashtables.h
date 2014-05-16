@@ -123,6 +123,10 @@ struct inet_listen_hashbucket {
 /* This is for listening sockets, thus all sockets which possess wildcards. */
 #define INET_LHTABLE_SIZE	32	/* Yes, really, this is all you need. */
 
+struct inet_listen_hashtable {
+	struct inet_listen_hashbucket  listening_hash[INET_LHTABLE_SIZE];
+};
+
 struct inet_hashinfo {
 	/* This is for sockets with full identity only.  Sockets here will
 	 * always be without wildcards and will have the following invariant:
@@ -158,7 +162,7 @@ struct inet_hashinfo {
 	 */
 	struct inet_listen_hashbucket	listening_hash[INET_LHTABLE_SIZE]
 					____cacheline_aligned_in_smp;
-
+	struct inet_listen_hashtable  __percpu *local_listening_hash;
 	atomic_t			bsockets;
 };
 
@@ -247,9 +251,15 @@ static inline int inet_lhashfn(struct net *net, const unsigned short num)
 	return (num + net_hash_mix(net)) & (INET_LHTABLE_SIZE - 1);
 }
 
+static inline int inet_lhashfn_ex(struct net *net, const unsigned int addr,
+				   const unsigned short num)
+{
+	return (addr >> 24 | num) & (INET_LHTABLE_SIZE -1);
+}
+
 static inline int inet_sk_listen_hashfn(const struct sock *sk)
 {
-	return inet_lhashfn(sock_net(sk), inet_sk(sk)->num);
+	return inet_lhashfn_ex(sock_net(sk), inet_sk(sk)->rcv_saddr, inet_sk(sk)->num);
 }
 
 /* Caller must disable local BH processing. */
