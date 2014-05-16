@@ -7243,6 +7243,7 @@ out_put_task:
 	put_online_cpus();
 	return retval;
 }
+EXPORT_SYMBOL(sched_setaffinity);
 
 static int get_user_cpu_mask(unsigned long __user *user_mask_ptr, unsigned len,
 			     struct cpumask *new_mask)
@@ -7306,6 +7307,7 @@ out_unlock:
 
 	return retval;
 }
+EXPORT_SYMBOL(sched_getaffinity);
 
 /**
  * sys_sched_getaffinity - get the cpu affinity of a process

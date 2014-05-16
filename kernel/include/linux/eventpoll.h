@@ -32,7 +32,7 @@
 /* Set the Edge Triggered behaviour for the target file descriptor */
 #define EPOLLET (1 << 31)
 
-/* 
+/*
  * On x86-64 make the 64bit structure have the same alignment as the
  * 32bit structure. This makes 32bit emulation easier.
  *
@@ -56,6 +56,99 @@ struct file;
 
 
 #ifdef CONFIG_EPOLL
+
+struct epoll_filefd {
+	struct file *file;
+	int fd;
+	int added;
+};
+
+/*
+ * Each file descriptor added to the eventpoll interface will
+ * have an entry of this type linked to the "rbr" RB tree.
+ */
+struct epitem {
+	/* RB tree node used to link this structure to the eventpoll RB tree */
+	struct rb_node rbn;
+
+	/* List header used to link this structure to the eventpoll ready list */
+	struct list_head rdllink;
+
+	/*
+	 * Works together "struct eventpoll"->ovflist in keeping the
+	 * single linked chain of items.
+	 */
+	struct epitem *next;
+
+	/* The file descriptor information this item refers to */
+	struct epoll_filefd ffd;
+
+	/* Number of active wait queue attached to poll operations */
+	int nwait;
+
+	/* List containing poll wait queues */
+	struct list_head pwqlist;
+
+	/* The "container" of this item */
+	struct eventpoll *ep;
+
+	/* List header used to link this item to the "struct file" items list */
+	struct list_head fllink;
+
+	/* The structure that describe the interested events and the source fd */
+	struct epoll_event event;
+};
+
+/*
+ * This structure is stored inside the "private_data" member of the file
+ * structure and rapresent the main data sructure for the eventpoll
+ * interface.
+ */
+struct eventpoll {
+	/* Protect the this structure access */
+	spinlock_t lock;
+
+	/*
+	 * This mutex is used to ensure that files are not removed
+	 * while epoll is using them. This is held during the event
+	 * collection loop, the file cleanup path, the epoll file exit
+	 * code and the ctl operations.
+	 */
+	struct mutex mtx;
+
+	/* Wait queue used by sys_epoll_wait() */
+	wait_queue_head_t wq;
+
+	/* Wait queue used by file->poll() */
+	wait_queue_head_t poll_wait;
+
+	/* List of ready file descriptors */
+	struct list_head rdllist;
+
+	/* RB tree root used to store monitored fd structs */
+	struct rb_root rbr;
+
+	/*
+	 * This is a single linked list that chains all the "struct epitem" that
+	 * happened while transfering ready events to userspace w/out
+	 * holding ->lock.
+	 */
+	struct epitem *ovflist;
+
+	/* The user that created the eventpoll descriptor */
+	struct user_struct *user;
+
+	struct file *file;
+
+	/* used to optimize loop detection check */
+	int visited;
+	struct list_head visited_list_link;
+};
+
+extern int ep_remove(struct eventpoll *ep, struct epitem *epi);
+extern int ep_insert(struct eventpoll *ep, struct epoll_event *event, struct file *tfile, int fd);
+extern int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event);
+extern struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd);
 
 /* Used to initialize the epoll bits inside the "struct file" */
 static inline void eventpoll_init_file(struct file *file)

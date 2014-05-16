@@ -63,6 +63,10 @@ int inet_csk_bind_conflict(const struct sock *sk,
 	int reuseport = sk->sk_reuseport;
 	uid_t uid = sock_i_uid((struct sock *)sk);
 
+	//FIXME: Is it check enough?
+	if (sk->sk_cpumask)
+		return 0;
+
 	/*
 	 * Unlike other sk lookup places we do not check
 	 * for sk_net here, since _all_ the socks listed

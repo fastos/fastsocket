@@ -892,6 +892,18 @@ void fd_install(unsigned int fd, struct file *file)
 
 EXPORT_SYMBOL(fd_install);
 
+void fd_reinstall(unsigned int fd, struct file *file)
+{
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	spin_lock(&files->file_lock);
+	fdt = files_fdtable(files);
+	BUG_ON(fdt->fd[fd] == NULL);
+	rcu_assign_pointer(fdt->fd[fd], file);
+	spin_unlock(&files->file_lock);
+}
+EXPORT_SYMBOL(fd_reinstall);
+
 long do_sys_open(int dfd, const char __user *filename, int flags, int mode)
 {
 	struct filename *tmp = getname(filename);

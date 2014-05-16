@@ -167,6 +167,7 @@ int cap_capget(struct task_struct *target, kernel_cap_t *effective,
 	rcu_read_unlock();
 	return 0;
 }
+EXPORT_SYMBOL(cap_capget);
 
 /*
  * Determine whether the inheritable capabilities are limited to the old
@@ -230,6 +231,8 @@ int cap_capset(struct cred *new,
 	new->cap_permitted   = *permitted;
 	return 0;
 }
+EXPORT_SYMBOL(cap_capset);
+
 
 /*
  * Clear proposed capability sets for execve().

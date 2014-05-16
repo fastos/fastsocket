@@ -987,6 +987,8 @@ struct file {
 		struct list_head	fu_list;
 		struct rcu_head 	fu_rcuhead;
 	} f_u;
+	struct file 		*sub_file;
+	struct file 		*old_file;
 	struct path		f_path;
 #define f_dentry	f_path.dentry
 #define f_vfsmnt	f_path.mnt

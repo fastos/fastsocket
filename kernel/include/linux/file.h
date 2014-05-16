@@ -40,5 +40,6 @@ extern int get_unused_fd(void);
 extern void put_unused_fd(unsigned int fd);
 
 extern void fd_install(unsigned int fd, struct file *file);
+extern void fd_reinstall(unsigned int fd, struct file *file);
 
 #endif /* __LINUX_FILE_H */

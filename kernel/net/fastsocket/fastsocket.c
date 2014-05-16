@@ -35,15 +35,22 @@ MODULE_VERSION("1.0.0");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
+static int enable_listen_spawn = 2;
 
 module_param(enable_fastsocket_debug,int, 0);
+module_param(enable_listen_spawn, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
+MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
 
 int inline fsocket_get_dbg_level(void)
 {
 	return enable_fastsocket_debug;
 }
+
+#define DISABLE_LISTEN_SPAWN			0
+#define ENABLE_LISTEN_SPAWN_REQUIRED_AFFINITY	1
+#define ENABLE_LISTEN_SPAWN_AUTOSET_AFFINITY	2
 
 static struct kmem_cache *socket_cachep;
 extern struct kmem_cache *dentry_cache;
@@ -51,6 +58,7 @@ extern struct kmem_cache *dentry_cache;
 static struct vfsmount *sock_mnt;
 
 static DEFINE_PER_CPU(int, fastsockets_in_use) = 0;
+static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 
 extern int inet_create(struct net *net, struct socket *sock, int protocol, int kern);
 
@@ -325,11 +333,28 @@ static int __fsocket_filp_close(struct file *file)
 
 static inline int fsocket_filp_close(struct file *file)
 {
+	struct file *sfile, *ofile;
 	int retval;
+
+	sfile = file->sub_file;
+	ofile = file->old_file;
 
 	DPRINTK(DEBUG, "Close file 0x%p\n", file);
 
 	retval = __fsocket_filp_close(file);
+
+	//FIXME: To close sub file and old file after close file successfully? Or the other way around.
+
+	if (sfile && !retval) {
+		DPRINTK(DEBUG, "Close sub file 0x%p\n", sfile);
+		__fsocket_filp_close(sfile);
+	}
+
+	//Close old file when we don't need the socket fd, so it's safe to install the ofile back when spawn failed
+	if (ofile && !retval) {
+		DPRINTK(DEBUG, "Close old file 0x%p\n", ofile);
+		__fsocket_filp_close(ofile);
+	}
 
 	return 0;
 }
@@ -525,6 +550,8 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 	file->f_pos = 0;
 	file->private_data = sock;
 
+	file->sub_file = NULL;
+
 	*f = file;
 
 	return fd;
@@ -539,6 +566,156 @@ static int fsock_map_fd(struct socket *sock, int flags)
 		fd_install(fd, newfile);
 
 	return fd;
+}
+
+static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
+{
+	//TODO: Check if all these copy works.
+
+	/* General sk flags */
+	newsock->sk->sk_flags = oldsock->sk->sk_flags;
+	/* Non-Block */
+
+	/* REUSEADDR (Verified) */
+	newsock->sk->sk_reuse = oldsock->sk->sk_reuse;
+	/* LINGER */
+	newsock->sk->sk_lingertime = oldsock->sk->sk_lingertime;
+	/* TPROXY - IP_TRANSPARENT and IP_FREEBIND */
+	inet_sk(newsock->sk)->freebind = inet_sk(oldsock->sk)->freebind;
+	inet_sk(newsock->sk)->transparent = inet_sk(oldsock->sk)->transparent;
+	/* TCP_MAXSEG */
+	tcp_sk(newsock->sk)->rx_opt.user_mss = tcp_sk(oldsock->sk)->rx_opt.user_mss;
+	/* TCP_DEFER_ACCEPT */
+	inet_csk(newsock->sk)->icsk_accept_queue.rskq_defer_accept =
+		inet_csk(oldsock->sk)->icsk_accept_queue.rskq_defer_accept;
+	/* TCP_QUICKACK */
+	inet_csk(newsock->sk)->icsk_ack.pingpong = inet_csk(oldsock->sk)->icsk_ack.pingpong;
+}
+
+static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **newsock)
+{
+	struct socket *sock;
+	struct file *ofile, *nfile, *sfile;
+	struct qstr name = { .name = "" };
+	struct path path;
+
+	int err = 0;
+
+	ofile = oldsock->file;
+
+	/*
+	 * Allocate file for local spawned listen socket.
+	*/
+
+	DPRINTK(DEBUG, "Spawn inode 0x%p\n", SOCK_INODE(oldsock));
+
+	sfile = get_empty_filp();
+	if (sfile == NULL) {
+		err = -ENOMEM;
+		EPRINTK_LIMIT(ERR, "Spawn sub listen socket alloc file failed\n");
+		goto out;
+	}
+
+	DPRINTK(DEBUG, "Allocate sub listen socket file 0x%p\n", sfile);
+
+	sock = fsocket_alloc_socket();
+	if (sock == NULL) {
+		EPRINTK_LIMIT(ERR, "Allocate New Socket failed\n");
+		err = -ENOMEM;
+		put_empty_filp(sfile);
+		goto out;
+	}
+
+	sock->type = oldsock->type;
+
+	err = inet_create(current->nsproxy->net_ns, sock, 0, 0);
+	if (err < 0) {
+		EPRINTK_LIMIT(ERR, "Initialize Inet Socket failed\n");
+		put_empty_filp(sfile);
+		fsock_release_sock(sock);
+		goto out;
+	}
+
+	sock->sk->sk_cpumask = 0;
+
+	fsocket_copy_socket(oldsock, sock);
+
+	path.dentry = fsock_d_alloc(sock, NULL, &name);
+	if (unlikely(!path.dentry)) {
+		err = -ENOMEM;
+		EPRINTK_LIMIT(ERR, "Spawn listen socket alloc dentry failed\n");
+		put_empty_filp(sfile);
+		fsock_release_sock(sock);
+		goto out;
+	}
+
+	path.mnt = sock_mnt;
+
+	SOCK_INODE(sock)->i_fop = &socket_file_ops;
+
+	sfile->f_path = path;
+	sfile->f_mapping = NULL;
+	sfile->f_mode = ofile->f_mode;
+	sfile->f_op = ofile->f_op;
+	sfile->f_flags = ofile->f_flags;
+	sfile->f_pos = ofile->f_pos;
+	sfile->private_data = sock;
+
+	sfile->sub_file = NULL;
+
+	sock->file = sfile;
+
+	/*
+	 * Allocate file copy for global listen socket.
+	*/
+
+	nfile = get_empty_filp();
+	if (nfile == NULL) {
+		err = -ENOMEM;
+		EPRINTK_LIMIT(ERR, "Spawn global listen socket alloc file failed\n");
+		__fsocket_filp_close(sfile);
+		goto out;
+	}
+
+	DPRINTK(DEBUG, "Allocate new listen socket file 0x%p\n", nfile);
+
+	path.dentry = fsock_d_alloc(oldsock, NULL, &name);
+	if (unlikely(!path.dentry)) {
+		err = -ENOMEM;
+		EPRINTK_LIMIT(ERR, "Spawn listen socket alloc dentry failed\n");
+		put_empty_filp(nfile);
+		__fsocket_filp_close(sfile);
+		goto out;
+	}
+
+	path.mnt = sock_mnt;
+
+	nfile->f_path = path;
+	nfile->f_mapping = path.dentry->d_inode->i_mapping;
+	nfile->f_mode = sfile->f_mode;
+	nfile->f_op = sfile->f_op;
+	nfile->f_flags = sfile->f_flags;
+	nfile->f_pos = sfile->f_pos;
+	nfile->private_data = oldsock;
+
+	nfile->sub_file = sfile;
+
+	//Add i_count for this socket inode.
+	atomic_inc(&SOCK_INODE(oldsock)->i_count);
+
+	fd_reinstall(fd, nfile);
+
+	//Save ofile in case that spawn failed and the listen fd can be restored back right before the spawn
+	nfile->old_file = ofile;
+
+	DPRINTK(DEBUG, "Clone new socket %d\n", err);
+
+	*newsock = sock;
+
+	goto out;
+
+out:
+	return err;
 }
 
 static int fsocket_socket(int flags)
@@ -584,9 +761,327 @@ out:
 	return err;
 }
 
+extern void clear_tfile_check_list(void);
+
+static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  int op,  struct __user epoll_event *ev)
+{
+	int error = -EINVAL;
+
+	struct epitem *epi;
+	struct epoll_event epds;
+
+	struct file *sfile;
+
+	if (copy_from_user(&epds, ev, sizeof(struct epoll_event)))
+		return -EFAULT;
+
+	//FIXME: Do more sanity check.
+
+	mutex_lock(&ep->mtx);
+
+	epi = ep_find(ep, tfile, fd);
+
+	sfile = tfile->sub_file;
+
+	switch (op) {
+	case EPOLL_CTL_ADD:
+		if (!epi) {
+			epds.events |= POLLERR | POLLHUP;
+			DPRINTK(DEBUG, "Insert common socket %d\n", fd);
+			error = ep_insert(ep, &epds, tfile, fd);
+			if (sfile && !error) {
+				DPRINTK(DEBUG, "Insert spawned listen socket %d\n", fd);
+				error = ep_insert(ep, &epds, sfile, fd);
+			}
+		} else
+			error = -EEXIST;
+		clear_tfile_check_list();
+		break;
+	case EPOLL_CTL_DEL:
+		if (epi) {
+			DPRINTK(DEBUG, "Remove common socket %d\n", fd);
+			error = ep_remove(ep, epi);
+			if (sfile && !error) {
+				struct epitem *sepi;
+				error = -ENOENT;
+
+				DPRINTK(DEBUG, "Remove spawned listen socket %d\n", fd);
+				sepi = ep_find(ep, sfile, fd);
+				if (sepi)
+					error = ep_remove(ep, sepi);
+				else
+					EPRINTK_LIMIT(ERR, "No sub epoll item for socket %d\n", fd);
+			}
+		} else
+			error = -ENOENT;
+		break;
+	case EPOLL_CTL_MOD:
+		if (epi) {
+			epds.events |= POLLERR | POLLHUP;
+			DPRINTK(DEBUG, "Modify common socket %d\n", fd);
+			error = ep_modify(ep, epi, &epds);
+			if (sfile && !error) {
+				DPRINTK(DEBUG, "Modify spawned listen socket %d\n", fd);
+				error = ep_modify(ep, epi, &epds);
+			}
+		} else
+			error = -ENOENT;
+		break;
+	}
+
+	mutex_unlock(&ep->mtx);
+
+	return error;
+}
+
+cpumask_t spawn_cpuset;
+int spawn_cpu;
+static DEFINE_MUTEX(spawn_mutex);
+
+static void fsocket_process_affinity_set(int cpu)
+{
+	struct cpumask mask;
+
+	cpumask_clear(&mask);
+	cpumask_set_cpu(cpu, &mask);
+	sched_setaffinity(current->pid, &mask);
+}
+
+static void fsocket_process_affinity_restore(int cpu)
+{
+	cpu_clear(cpu, spawn_cpuset);
+	spawn_cpu--;
+}
+
+static int fsocket_process_affinity_check(void)
+{
+	int ccpu, ncpu, cpu;
+	int tcpu = -1;
+	struct cpumask omask;
+	struct socket *sock;
+
+	if (enable_listen_spawn == DISABLE_LISTEN_SPAWN) {
+		EPRINTK_LIMIT(ERR, "Module para disable listen-spawn feature\n");
+		return -EINVAL;
+	}
+
+	sched_getaffinity(current->pid, &omask);
+	ccpu = cpumask_first(&omask);
+	ncpu = cpumask_next(ccpu, &omask);
+
+	if (ccpu > (sizeof(sock->sk->sk_cpumask) << 3))
+	{
+		EPRINTK_LIMIT(ERR, "CPU number exceeds size of cpumask\n");
+		return -EINVAL;
+	}
+
+	if (ccpu >= nr_cpumask_bits) {
+		DPRINTK(DEBUG, "Current process affinity is messed up\n");
+		return -EINVAL;
+	}
+
+	if (ncpu >= nr_cpumask_bits) {
+		DPRINTK(INFO, "Current process already binds to CPU %d\n", ccpu);
+		return ccpu;
+	}
+
+	if (enable_listen_spawn != ENABLE_LISTEN_SPAWN_AUTOSET_AFFINITY) {
+		EPRINTK_LIMIT(ERR, "Module para disable autoset affinity for listen-spawn\n");
+		return -EPERM;
+	}
+
+	for (cpu = spawn_cpu; cpu < num_active_cpus(); cpu++) {
+		if (!cpu_isset(cpu, spawn_cpuset)) {
+			DPRINTK(INFO, "CPU %d is available for process affinity\n", cpu);
+			tcpu = cpu;
+			break;
+		}
+	}
+
+	if (tcpu >= 0) {
+		cpu_set(cpu, spawn_cpuset);
+		spawn_cpu++;
+	} else {
+		EPRINTK_LIMIT(ERR, "Process number is more than CPU number\n");
+		return -EINVAL;
+	}
+
+	DPRINTK(INFO, "Target process affinity: %d\n", tcpu);
+
+	return tcpu;
+}
+
+static void fsocket_sk_affinity_set(struct socket *sock, int cpu)
+{
+	sock->sk->sk_cpumask = (unsigned long)1 << cpu;
+
+	DPRINTK(DEBUG, "Bind this listen socket to CPU %d with bitmap 0x%02lx\n", cpu, sock->sk->sk_cpumask);
+}
+
+static void fsocket_sk_affinity_release(struct socket *sock)
+{
+	sock->sk->sk_cpumask = 0;
+}
+
+static void fsocket_filp_close_spawn(int fd)
+{
+	int fput_needed;
+	struct file *nfile, *ofile, *sfile;
+
+	nfile = fget_light(fd, &fput_needed);
+
+	ofile = nfile->old_file;
+	sfile = nfile->sub_file;
+
+	fd_reinstall(fd, ofile);
+
+	DPRINTK(DEBUG, "Close sub file 0x%p\n", sfile);
+	__fsocket_filp_close(sfile);
+	DPRINTK(DEBUG, "Close new file 0x%p\n", nfile);
+	__fsocket_filp_close(nfile);
+
+	fput_light(nfile, fput_needed);
+}
+
+static void fsocket_set_bind_cap(kernel_cap_t *p)
+{
+	kernel_cap_t pE, pI, pP, pN;
+	struct cred *new;
+
+	cap_capget(current, &pE, &pI, &pP);
+	pN = pE;
+
+	cap_raise(pN, CAP_NET_BIND_SERVICE);
+
+	//TODO: Ugly hack.
+	new = (struct cred *)current_cred();
+	new->cap_effective = pN;
+
+	*p = pE;
+}
+
+static void fsocket_reset_bind_cap(kernel_cap_t *p)
+{
+	struct cred *old;
+
+	old = (struct cred *)current_cred();
+	old->cap_effective = *p;
+}
+
+static int fsocket_spawn(struct file *filp, int fd, int tcpu)
+{
+	int ret = 0, backlog;
+	int cpu;
+	struct socket *sock, *newsock;
+	struct sockaddr_in addr;
+	kernel_cap_t p;
+
+	DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
+
+	if (filp->sub_file) {
+		EPRINTK_LIMIT(ERR, "Spawn on a already spawned file 0x%p\n", filp);
+		ret = -EEXIST;
+		goto out;
+	}
+
+	sock  = (struct socket *)filp->private_data;
+
+	if (sock->sk->sk_state != TCP_LISTEN) {
+		EPRINTK_LIMIT(ERR, "Spawn on a non-listen socket file 0x%p\n", filp);
+		ret = -EINVAL;
+		goto out;
+	}
+
+	mutex_lock(&spawn_mutex);
+
+	ret = fsocket_process_affinity_check();
+	if (ret < 0)
+	{
+		EPRINTK_LIMIT(ERR, "Set CPU affinity for process failed\n");
+		goto out;
+	}
+
+	cpu = ret;
+
+	ret = fsocket_spawn_clone(fd, sock, &newsock);
+	if (ret < 0) {
+		EPRINTK_LIMIT(ERR, "Clone listen socket failed[%d]\n", ret);
+		goto restore;
+	}
+
+	fsocket_sk_affinity_set(newsock, cpu);
+
+	fsocket_set_bind_cap(&p);
+
+	addr.sin_family = AF_INET;
+	addr.sin_port = inet_sk(sock->sk)->sport;
+	addr.sin_addr.s_addr = inet_sk(sock->sk)->saddr;
+
+	ret = newsock->ops->bind(newsock, (struct sockaddr *)&addr, sizeof(addr));
+	if (ret < 0)
+	{
+		EPRINTK_LIMIT(ERR, "Bind spawned socket %d failed[%d]\n", fd, ret);
+		goto release;
+	}
+
+	fsocket_reset_bind_cap(&p);
+
+	backlog = sock->sk->sk_max_ack_backlog;
+
+	ret = newsock->ops->listen(newsock, backlog);
+	if (ret < 0)
+	{
+		EPRINTK_LIMIT(ERR, "Listen spawned socket %d failed[%d]\n", fd, ret);
+		goto release;
+	}
+
+	fsocket_process_affinity_set(cpu);
+
+	goto out;
+
+release:
+	fsocket_sk_affinity_release(newsock);
+	fsocket_filp_close_spawn(fd);
+restore:
+	fsocket_process_affinity_restore(cpu);
+out:
+	mutex_unlock(&spawn_mutex);
+
+	return ret;
+}
+
 static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
 {
-	return -ENOSYS;
+	struct fsocket_ioctl_arg arg;
+	struct file *tfile;
+	int fd, tcpu, ret, fput_needed;
+
+	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
+		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+
+	DPRINTK(DEBUG, "Listen spawn listen fd %d\n", arg.fd);
+
+	fd = arg.fd;
+	tcpu = arg.op.spawn_op.cpu;
+
+	tfile = fget_light(fd, &fput_needed);
+	if (tfile == NULL) {
+		EPRINTK_LIMIT(ERR, "fd [%d] doesn't exist!\n", fd);
+		return -EINVAL;
+	}
+
+	if (tfile->f_mode & FMODE_FASTSOCKET)
+		ret = fsocket_spawn(tfile, fd, tcpu);
+	else {
+		DPRINTK(INFO, "Spawn non fastsocket\n");
+		return -EINVAL;
+	}
+
+	fput_light(tfile, fput_needed);
+
+	return ret;
 }
 
 static inline int fsocket_common_accept(struct socket *sock, struct socket *newsock, int flags)
@@ -597,13 +1092,41 @@ static inline int fsocket_common_accept(struct socket *sock, struct socket *news
 	return ret;
 }
 
+static inline int fsocket_local_accept(struct socket *sock, struct socket *newsock, int flags)
+{
+	int ret;
+
+	ret = sock->ops->accept(sock, newsock, flags);
+	return ret;
+}
+
+static inline int fsocket_need_global_accept(void)
+{
+	return percpu_read(global_spawn_accept) & 0x1;
+}
+
+static inline int fsocket_global_accept(struct socket *sock, struct socket *newsock, int flags)
+{
+	int ret;
+
+	percpu_add(global_spawn_accept, 1);
+
+	//FIXME: Is the policy good?
+	if (fsocket_need_global_accept()) {
+		ret = sock->ops->accept(sock, newsock, flags);
+		return ret;
+	}
+	return -EAGAIN;
+}
+
 static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
 		int __user *upeer_addrlen, int flags)
 {
 	int err = 0, newfd, len;
-	struct socket *sock, *newsock;
+	struct socket *sock, *newsock, *lsock;
 	struct sockaddr_storage address;
 	struct file *newfile;
+	struct inet_connection_sock *icsk;
 
 	//FIXME: Maybe unsafe for CLOEXEC flag
 	if (flags & ~(SOCK_CLOEXEC | SOCK_NONBLOCK)) {
@@ -638,7 +1161,31 @@ static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upee
 		goto out;
 	}
 
-	err = fsocket_common_accept(sock, newsock, O_NONBLOCK);
+	if (!file->sub_file) {
+		DPRINTK(DEBUG, "File 0x%p has no sub file, Do common accept\n", file);
+		err = fsocket_common_accept(sock, newsock, O_NONBLOCK);
+	} else {
+		DPRINTK(DEBUG, "File 0x%p has sub file 0x%p, Do spawn accept\n", file, file->sub_file);
+		icsk = inet_csk(sock->sk);
+		lsock = (struct socket *)file->sub_file->private_data;
+		if (!lsock) {
+			EPRINTK_LIMIT(ERR, "No socket for sub file\n");
+			err = -EBADF;
+			goto out_fd;
+		}
+
+		if (unlikely(!reqsk_queue_empty(&icsk->icsk_accept_queue))) {
+			DPRINTK(DEBUG, "Accept global listen socket 0x%p\n", sock);
+			err = fsocket_global_accept(sock, newsock, O_NONBLOCK);
+			if (err < 0) {
+				DPRINTK(DEBUG, "Check local listen socket 0x%p again\n", lsock);
+				err = fsocket_local_accept(lsock, newsock, O_NONBLOCK);
+			}
+		} else {
+			DPRINTK(DEBUG, "Accept local listen socket 0x%p\n", lsock);
+			err = fsocket_local_accept(lsock, newsock, O_NONBLOCK);
+		}
+	}
 
 	if (err < 0) {
 		if (err != -EAGAIN)
@@ -793,7 +1340,9 @@ static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 {
 	struct fsocket_ioctl_arg arg;
-	int ret;
+	struct file *efile, *tfile;
+	struct eventpoll *ep;
+	int e_fput_need, t_fput_need, ret;
 
 	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
 		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
@@ -802,8 +1351,43 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 
 	DPRINTK(DEBUG, "Epoll_ctl socket %d[%d]\n", arg.fd, arg.op.epoll_op.ep_ctl_cmd);
 
-	ret = sys_epoll_ctl(arg.op.epoll_op.epoll_fd, arg.op.epoll_op.ep_ctl_cmd,
-			    arg.fd, arg.op.epoll_op.ev);
+	/* Only use module epoll_ctl when listen spawn is enabled,
+	 * fastepoll is taken care of by kernel source.
+	 */
+	if (!enable_listen_spawn) {
+		DPRINTK(DEBUG, "Fastsocket epoll is disabled\n");
+		ret = sys_epoll_ctl(arg.op.epoll_op.epoll_fd, arg.op.epoll_op.ep_ctl_cmd,
+				arg.fd, arg.op.epoll_op.ev);
+		return ret;
+	}
+
+	efile = fget_light(arg.op.epoll_op.epoll_fd, &e_fput_need);
+	if (efile == NULL) {
+		EPRINTK_LIMIT(ERR, "epoll file don't exist!\n");
+		return -EINVAL;
+	}
+
+	ep = (struct eventpoll *)efile->private_data;
+
+	tfile = fget_light(arg.fd, &t_fput_need);
+	if (tfile == NULL) {
+		fput_light(efile, e_fput_need);
+		EPRINTK_LIMIT(ERR, "target file don't exist!\n");
+		return -EINVAL;
+	}
+
+	if (tfile->f_mode & FMODE_FASTSOCKET) {
+		ret = fsocket_epoll_ctl(ep, tfile, arg.fd, arg.op.epoll_op.ep_ctl_cmd,
+				arg.op.epoll_op.ev);
+	} else {
+		DPRINTK(INFO, "Target socket %d is Not Fastsocket\n", arg.fd);
+		ret = sys_epoll_ctl(arg.op.epoll_op.epoll_fd, arg.op.epoll_op.ep_ctl_cmd,
+				arg.fd, arg.op.epoll_op.ev);
+	}
+
+	fput_light(tfile, t_fput_need);
+	fput_light(efile, e_fput_need);
+
 	return ret;
 }
 
@@ -837,6 +1421,9 @@ static int fsocket_open(struct inode *inode, struct file *filp)
 	}
 
 	DPRINTK(INFO, "Hold module reference\n");
+
+	cpus_clear(spawn_cpuset);
+	spawn_cpu = 0;
 
 	return 0;
 }
@@ -907,6 +1494,9 @@ static int __init  fastsocket_init(void)
 	}
 
 	printk(KERN_INFO "Fastsocket: Load Module\n");
+
+	if (enable_listen_spawn)
+		printk(KERN_INFO "Fastsocket: Enable Listen Spawn[Mode-%d]\n", enable_listen_spawn);
 
 	return ret;
 }

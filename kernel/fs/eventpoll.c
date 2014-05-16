@@ -92,11 +92,15 @@
 
 #define EP_ITEM_COST (sizeof(struct epitem) + sizeof(struct eppoll_entry))
 
+#if 0
+
 struct epoll_filefd {
 	struct file *file;
 	int fd;
 	int added;
 };
+
+#endif
 
 /*
  * Structure used to track possible nested calls, for too deep recursions
@@ -116,6 +120,8 @@ struct nested_calls {
 	struct list_head tasks_call_list;
 	spinlock_t lock;
 };
+
+#if 0
 
 /*
  * Each file descriptor added to the eventpoll interface will
@@ -198,6 +204,8 @@ struct eventpoll {
 	int visited;
 	struct list_head visited_list_link;
 };
+
+#endif
 
 /* Wait structure used by the poll hooks */
 struct eppoll_entry {
@@ -304,7 +312,7 @@ static void clear_added_flag(struct tfile_check *tfile_check_iter)
 		tfile_check_iter->tfile_arr[i]->added = 0;
 }
 
-static void clear_tfile_check_list(void)
+void clear_tfile_check_list(void)
 {
 	struct tfile_check *tfile_check_iter, *tmp;
 
@@ -321,6 +329,7 @@ static void clear_tfile_check_list(void)
 	}
 	current_tfile_check = &base_tfile_check;
 }
+EXPORT_SYMBOL(clear_tfile_check_list);
 
 
 
@@ -633,7 +642,7 @@ static int ep_scan_ready_list(struct eventpoll *ep,
  * Removes a "struct epitem" from the eventpoll RB tree and deallocates
  * all the associated resources. Must be called with "mtx" held.
  */
-static int ep_remove(struct eventpoll *ep, struct epitem *epi)
+int ep_remove(struct eventpoll *ep, struct epitem *epi)
 {
 	unsigned long flags;
 	struct file *file = epi->ffd.file;
@@ -668,6 +677,8 @@ static int ep_remove(struct eventpoll *ep, struct epitem *epi)
 
 	return 0;
 }
+
+EXPORT_SYMBOL(ep_remove);
 
 static void ep_free(struct eventpoll *ep)
 {
@@ -859,7 +870,7 @@ free_uid:
  * are protected by the "mtx" mutex, and ep_find() must be called with
  * "mtx" held.
  */
-static struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
+struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
 {
 	int kcmp;
 	struct rb_node *rbp;
@@ -882,6 +893,8 @@ static struct epitem *ep_find(struct eventpoll *ep, struct file *file, int fd)
 
 	return epir;
 }
+
+EXPORT_SYMBOL(ep_find);
 
 /*
  * This is the callback that is passed to the wait queue wakeup
@@ -1097,7 +1110,7 @@ static int reverse_path_check(void)
 /*
  * Must be called with "mtx" held.
  */
-static int ep_insert(struct eventpoll *ep, struct epoll_event *event,
+int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 		     struct file *tfile, int fd)
 {
 	int error, revents, pwake = 0;
@@ -1216,11 +1229,13 @@ error_unregister:
 	return error;
 }
 
+EXPORT_SYMBOL(ep_insert);
+
 /*
  * Modify the interest event mask by dropping an event if the new mask
  * has a match in the current file status. Must be called with "mtx" held.
  */
-static int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event)
+int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_event *event)
 {
 	int pwake = 0;
 	unsigned int revents;
@@ -1263,6 +1278,8 @@ static int ep_modify(struct eventpoll *ep, struct epitem *epi, struct epoll_even
 
 	return 0;
 }
+
+EXPORT_SYMBOL(ep_modify);
 
 static int ep_send_events_proc(struct eventpoll *ep, struct list_head *head,
 			       void *priv)
