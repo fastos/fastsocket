@@ -777,11 +777,15 @@ out:
 	return err;
 }
 
+extern int is_file_epoll_export(struct file *f);
 extern void clear_tfile_check_list(void);
+extern int ep_loop_check(struct eventpoll *ep, struct file *file);
+extern struct mutex epmutex;
 
 static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  int op,  struct __user epoll_event *ev)
 {
 	int error = -EINVAL;
+	int did_lock_epmutex = 0;
 
 	struct epitem *epi;
 	struct epoll_event epds;
@@ -792,6 +796,24 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 		return -EFAULT;
 
 	//FIXME: Do more sanity check.
+
+	if (op == EPOLL_CTL_ADD || op == EPOLL_CTL_DEL) {
+		mutex_lock(&epmutex);
+		did_lock_epmutex = 1;
+	}
+
+	/**
+	 * sub_file is used to record the spawned listeners only. If tfile is an
+	 * epoll file, its sub_file must then be null. Thus there is no need to
+	 * involve sub_file in the checking.
+	 */
+	if ((op == EPOLL_CTL_ADD) && (is_file_epoll_export(tfile))) {
+			error = -ELOOP;
+			if (ep_loop_check(ep, tfile) != 0) {
+				clear_tfile_check_list();
+				goto error_loop_check;
+			}
+	}
 
 	mutex_lock(&ep->mtx);
 
@@ -855,6 +877,10 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 	}
 
 	mutex_unlock(&ep->mtx);
+
+error_loop_check:
+	if (did_lock_epmutex)
+		mutex_unlock(&epmutex);
 
 	return error;
 }

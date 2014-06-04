@@ -246,7 +246,8 @@ static int max_user_watches __read_mostly;
 /*
  * This mutex is used to serialize ep_free() and eventpoll_release_file().
  */
-static DEFINE_MUTEX(epmutex);
+DEFINE_MUTEX(epmutex);
+EXPORT_SYMBOL(epmutex);
 
 /* Used to check for epoll file descriptor inclusion loops */
 static struct nested_calls poll_loop_ncalls;
@@ -797,6 +798,12 @@ static inline int is_file_epoll(struct file *f)
 {
 	return f->f_op == &eventpoll_fops;
 }
+
+int is_file_epoll_export(struct file *f)
+{
+	return is_file_epoll(f);
+}
+EXPORT_SYMBOL(is_file_epoll_export);
 
 /*
  * This is called from eventpoll_release() to unlink files from the eventpoll
@@ -1540,7 +1547,7 @@ static int ep_loop_check_proc(void *priv, void *cookie, int call_nests)
  * Returns: Returns zero if adding the epoll @file inside current epoll
  *          structure @ep does not violate the constraints, or -1 otherwise.
  */
-static int ep_loop_check(struct eventpoll *ep, struct file *file)
+int ep_loop_check(struct eventpoll *ep, struct file *file)
 {
 	int ret;
 	struct eventpoll *ep_cur, *ep_next;
@@ -1555,6 +1562,7 @@ static int ep_loop_check(struct eventpoll *ep, struct file *file)
 	}
 	return ret;
 }
+EXPORT_SYMBOL(ep_loop_check);
 
 /*
  * Open an eventpoll file descriptor.
