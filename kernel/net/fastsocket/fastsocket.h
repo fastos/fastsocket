@@ -5,23 +5,13 @@
 
 #define IOC_ID 0xf5
 
-#define FSOCKET_IOC_SOCKET _IO(IOC_ID, 0x1)
-#define FSOCKET_IOC_BIND   _IO(IOC_ID, 0x2)
-#define FSOCKET_IOC_LISTEN _IO(IOC_ID, 0x3)
-#define FSOCKET_IOC_SETSOCKOPT _IO(IOC_ID, 0x4)
-#define FSOCKET_IOC_GETSOCKOPT _IO(IOC_ID, 0x5)
-#define FSOCKET_IOC_READ  _IO(IOC_ID, 0x6)
-#define FSOCKET_IOC_WRITE _IO(IOC_ID, 0x7)
-#define FSOCKET_IOC_ACCEPT _IO(IOC_ID, 0x8)
-#define FSOCKET_IOC_SNDMSG  _IO(IOC_ID, 0x9)
-#define FSOCKET_IOC_RCVMSG _IO(IOC_ID, 0x10)
-#define FSOCKET_IOC_CLOSE _IO(IOC_ID, 0x11)
-#define FSOCKET_IOC_RECVMSG _IO(IOC_ID, 0x12)
-#define FSOCKET_IOC_EPOLL _IO(IOC_ID, 0x13)
-#define FSOCKET_IOC_EPOLL_CTL _IO(IOC_ID, 0x14)
-#define FSOCKET_IOC_EPOLL_WAIT _IO(IOC_ID, 0x15)
-#define FSOCKET_IOC_CONNECT _IO(IOC_ID, 0x16)
-#define FSOCKET_IOC_SPAWN _IO(IOC_ID, 0x17)
+#define FSOCKET_IOC_SOCKET _IO(IOC_ID, 0x01)
+#define FSOCKET_IOC_LISTEN _IO(IOC_ID, 0x02)
+#define FSOCKET_IOC_ACCEPT _IO(IOC_ID, 0x03)
+#define FSOCKET_IOC_CLOSE _IO(IOC_ID, 0x04)
+#define FSOCKET_IOC_EPOLL_CTL _IO(IOC_ID, 0x05)
+#define FSOCKET_IOC_SPAWN_LISTEN _IO(IOC_ID, 0x06)
+#define FSOCKET_IOC_SHUTDOWN_LISTEN _IO(IOC_ID, 0x07)
 
 #define ALERT 0x00
 #define ERR 0x01
@@ -91,6 +81,10 @@ struct fsocket_ioctl_arg {
 			u32 type;
 			u32 protocol;
 		}socket_op;
+
+		struct shutdown_op_t {
+			int how;
+		}shutdown_op;
 
 		struct epoll_op_t {
 			u32 epoll_fd;

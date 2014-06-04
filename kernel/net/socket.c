@@ -2701,9 +2701,17 @@ int kernel_sock_shutdown(struct socket *sock, enum sock_shutdown_cmd how)
 	return sock->ops->shutdown(sock, how);
 }
 
-EXPORT_SYMBOL(sys_accept);
-EXPORT_SYMBOL(sys_listen);
 EXPORT_SYMBOL(sys_socket);
+EXPORT_SYMBOL(sys_bind);
+EXPORT_SYMBOL(sys_connect);
+EXPORT_SYMBOL(sys_listen);
+EXPORT_SYMBOL(sys_accept);
+EXPORT_SYMBOL(sys_accept4);
+EXPORT_SYMBOL(sys_getsockname);
+EXPORT_SYMBOL(sys_getpeername);
+EXPORT_SYMBOL(sys_shutdown);
+EXPORT_SYMBOL(sys_setsockopt);
+EXPORT_SYMBOL(sys_getsockopt);
 EXPORT_SYMBOL(sock_create);
 EXPORT_SYMBOL(sock_create_kern);
 EXPORT_SYMBOL(sock_create_lite);

@@ -31,7 +31,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.0");
+MODULE_VERSION("1.0.1");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
@@ -1029,6 +1029,8 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 
 	DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
 
+	mutex_lock(&spawn_mutex);
+
 	if (filp->sub_file) {
 		EPRINTK_LIMIT(ERR, "Spawn on a already spawned file 0x%p\n", filp);
 		ret = -EEXIST;
@@ -1038,12 +1040,10 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	sock  = (struct socket *)filp->private_data;
 
 	if (sock->sk->sk_state != TCP_LISTEN) {
-		EPRINTK_LIMIT(ERR, "Spawn on a non-listen socket file 0x%p\n", filp);
+		EPRINTK_LIMIT(ERR, "Spawn on a non-listen socket[%d-%d] file 0x%p\n", fd, sock->sk->sk_state, filp);
 		ret = -EINVAL;
 		goto out;
 	}
-
-	mutex_lock(&spawn_mutex);
 
 	ret = fsocket_process_affinity_check();
 	if (ret < 0)
@@ -1101,7 +1101,7 @@ out:
 	return ret;
 }
 
-static int fastsocket_spawn(struct fsocket_ioctl_arg *u_arg)
+static int fastsocket_spawn_listen(struct fsocket_ioctl_arg *u_arg)
 {
 	struct fsocket_ioctl_arg arg;
 	struct file *tfile;
@@ -1426,6 +1426,59 @@ static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 	return error;
 }
 
+static int fsocket_shutdown_listen(struct file *file, int how)
+{
+	struct socket *sock;
+	int err;
+
+	sock = file->private_data;
+	if (sock->sk->sk_state == TCP_LISTEN) {
+		struct file *sfile = file->sub_file;
+
+		err = sock->ops->shutdown(sock, how);
+		if (!err && sfile && sfile->private_data) {
+			struct socket *ssock;
+
+			ssock = sfile->private_data;
+			err = ssock->ops->shutdown(ssock, how);
+		}
+	} else {
+		err = sock->ops->shutdown(sock, how);
+	}
+
+	return err;
+}
+
+static int fastsocket_shutdown_listen(struct fsocket_ioctl_arg * u_arg)
+{
+	int ret;
+	struct fsocket_ioctl_arg arg;
+	struct file *tfile;
+	int fput_need;
+
+	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
+		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+
+	tfile =	fget_light(arg.fd, &fput_need);
+	if (tfile == NULL) {
+		EPRINTK_LIMIT(ERR, "Accept file don't exist!\n");
+		return -ENOENT;
+	}
+
+	if (tfile->f_mode & FMODE_FASTSOCKET) {
+		DPRINTK(DEBUG, "Shutdown fastsocket %d\n", arg.fd);
+		ret = fsocket_shutdown_listen(tfile, arg.op.shutdown_op.how);
+	} else {
+		DPRINTK(INFO, "Shutdown non-fastsocket %d\n", arg.fd);
+		ret = sys_shutdown(arg.fd, arg.op.shutdown_op.how);
+	}
+	fput_light(tfile, fput_need);
+
+	return ret;
+}
+
 static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 {
 	struct fsocket_ioctl_arg arg;
@@ -1487,12 +1540,14 @@ static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long 
 		return fastsocket_socket((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_LISTEN:
 		return fastsocket_listen((struct fsocket_ioctl_arg *) arg);
-	case FSOCKET_IOC_SPAWN:
-		return fastsocket_spawn((struct fsocket_ioctl_arg *) arg);
+	case FSOCKET_IOC_SPAWN_LISTEN:
+		return fastsocket_spawn_listen((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_ACCEPT:
 		return fastsocket_accept((struct fsocket_ioctl_arg *)arg);
 	case FSOCKET_IOC_CLOSE:
 		return fastsocket_close((struct fsocket_ioctl_arg *) arg);
+	case FSOCKET_IOC_SHUTDOWN_LISTEN:
+		return fastsocket_shutdown_listen((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_EPOLL_CTL:
 		return fastsocket_epoll_ctl((struct fsocket_ioctl_arg *)arg);
 	default:
