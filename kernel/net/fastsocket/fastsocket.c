@@ -91,6 +91,7 @@ static void fastsock_destroy_inode(struct inode *inode)
 {
 	DPRINTK(DEBUG, "Free inode 0x%p\n", inode);
 
+	security_inode_free(inode);
 	fsock_release_sock(INODE_SOCKET(inode));
 	fsock_free_sock(INODE_SOCKET(inode));
 }
@@ -102,6 +103,11 @@ static struct inode *fastsock_alloc_inode(struct super_block *sb)
 	ei = kmem_cache_alloc(socket_cachep, GFP_KERNEL);
 	if (!ei)
 		return NULL;
+
+	if (security_inode_alloc(&ei->vfs_inode)) {
+		kmem_cache_free(socket_cachep, ei);
+		return NULL;
+	}
 
 	init_waitqueue_head(&ei->socket.wait);
 
@@ -409,6 +415,12 @@ static struct socket *fsocket_alloc_socket(void)
 		static const struct file_operations empty_fops;
 
 		if(!try_module_get(THIS_MODULE)) {
+			kmem_cache_free(socket_cachep, sock);
+			return NULL;
+		}
+
+		if (security_inode_alloc(SOCK_INODE(sock))) {
+			module_put(THIS_MODULE);
 			kmem_cache_free(socket_cachep, sock);
 			return NULL;
 		}

@@ -380,6 +380,7 @@ void security_inode_free(struct inode *inode)
 	ima_inode_free(inode);
 	security_ops->inode_free_security(inode);
 }
+EXPORT_SYMBOL(security_inode_free);
 
 int security_inode_init_security(struct inode *inode, struct inode *dir,
 				  char **name, void **value, size_t *len)
