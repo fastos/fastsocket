@@ -853,7 +853,13 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 				error = -ENOENT;
 
 				DPRINTK(DEBUG, "Remove spawned listen socket %d\n", fd);
-				sepi = sfile->f_epi;
+				if (sfile->f_mode & FMODE_BIND_EPI) {
+					DPRINTK(DEBUG, "File 0x%p binds epi\n", sfile);
+					sepi = sfile->f_epi;
+				} else {
+					DPRINTK(DEBUG, "File 0x%p binds NO epi\n", sfile);
+					sepi = ep_find(ep, sfile, fd);
+				}
 				if (sepi)
 					error = ep_remove(ep, sepi);
 				else
