@@ -794,10 +794,12 @@ extern void clear_tfile_check_list(void);
 extern int ep_loop_check(struct eventpoll *ep, struct file *file);
 extern struct mutex epmutex;
 
-static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  int op,  struct __user epoll_event *ev)
+static int fsocket_epoll_ctl(struct file *file, struct file *tfile, int fd,  int op,  struct __user epoll_event *ev)
 {
 	int error = -EINVAL;
-	int did_lock_epmutex = 0;
+	int full_check = 0;
+	struct eventpoll *ep = file->private_data;
+	struct eventpoll *tep = NULL;
 
 	struct epitem *epi;
 	struct epoll_event epds;
@@ -809,25 +811,38 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 
 	//FIXME: Do more sanity check.
 
-	if (op == EPOLL_CTL_ADD || op == EPOLL_CTL_DEL) {
-		mutex_lock(&epmutex);
-		did_lock_epmutex = 1;
-	}
-
 	/**
 	 * sub_file is used to record the spawned listeners only. If tfile is an
 	 * epoll file, its sub_file must then be null. Thus there is no need to
 	 * involve sub_file in the checking.
 	 */
-	if ((op == EPOLL_CTL_ADD) && (is_file_epoll_export(tfile))) {
-			error = -ELOOP;
-			if (ep_loop_check(ep, tfile) != 0) {
-				clear_tfile_check_list();
-				goto error_loop_check;
-			}
-	}
-
 	mutex_lock(&ep->mtx);
+	if (op == EPOLL_CTL_ADD) {
+		if (!list_empty(&file->f_ep_links) ||
+		    is_file_epoll_export(tfile)) {
+			full_check = 1;
+			WARN(1, "Why do fastsocket need nested ep?!\n");
+			mutex_unlock(&ep->mtx);
+			mutex_lock(&epmutex);
+			goto error_loop_check;
+			if (is_file_epoll_export(tfile)) {
+				error = -ELOOP;
+				if (ep_loop_check(ep, tfile) != 0) {
+					clear_tfile_check_list();
+					goto error_loop_check;
+				}
+			}
+			mutex_lock(&ep->mtx);
+			if (is_file_epoll_export(tfile)) {
+				tep = tfile->private_data;
+				mutex_lock(&tep->mtx);
+			}
+		}
+	}
+	if (op == EPOLL_CTL_DEL && is_file_epoll_export(tfile)) {
+		tep = tfile->private_data;
+		mutex_lock(&tep->mtx);
+	}
 
 	if (tfile->f_mode & FMODE_BIND_EPI) {
 		DPRINTK(DEBUG, "File 0x%p binds epi\n", tfile);
@@ -847,14 +862,15 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 		if (!epi) {
 			epds.events |= POLLERR | POLLHUP;
 			DPRINTK(DEBUG, "Insert common socket %d\n", fd);
-			error = ep_insert(ep, &epds, tfile, fd, 0);
+			error = ep_insert(ep, &epds, tfile, fd, full_check);
 			if (sfile && !error) {
 				DPRINTK(DEBUG, "Insert spawned listen socket %d\n", fd);
-				error = ep_insert(ep, &epds, sfile, fd, 0);
+				error = ep_insert(ep, &epds, sfile, fd, full_check);
 			}
 		} else
 			error = -EEXIST;
-		clear_tfile_check_list();
+		if (full_check)
+			clear_tfile_check_list();
 		break;
 	case EPOLL_CTL_DEL:
 		if (epi) {
@@ -893,11 +909,12 @@ static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  
 			error = -ENOENT;
 		break;
 	}
-
+	if (tep != NULL)
+		mutex_unlock(&tep->mtx);
 	mutex_unlock(&ep->mtx);
 
 error_loop_check:
-	if (did_lock_epmutex)
+	if (full_check)
 		mutex_unlock(&epmutex);
 
 	return error;
@@ -1537,7 +1554,7 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 	}
 
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
-		ret = fsocket_epoll_ctl(ep, tfile, arg.fd, arg.op.epoll_op.ep_ctl_cmd,
+		ret = fsocket_epoll_ctl(efile, tfile, arg.fd, arg.op.epoll_op.ep_ctl_cmd,
 				arg.op.epoll_op.ev);
 	} else {
 		DPRINTK(INFO, "Target socket %d is Not Fastsocket\n", arg.fd);
