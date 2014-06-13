@@ -1769,8 +1769,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 			error = ep_insert(ep, &epds, tfile, fd, full_check);
 		} else
 			error = -EEXIST;
-		if (full_check)
-			clear_tfile_check_list();
+		clear_tfile_check_list();
 		break;
 	case EPOLL_CTL_DEL:
 		if (epi)

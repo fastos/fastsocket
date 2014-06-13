@@ -869,8 +869,7 @@ static int fsocket_epoll_ctl(struct file *file, struct file *tfile, int fd,  int
 			}
 		} else
 			error = -EEXIST;
-		if (full_check)
-			clear_tfile_check_list();
+		clear_tfile_check_list();
 		break;
 	case EPOLL_CTL_DEL:
 		if (epi) {
