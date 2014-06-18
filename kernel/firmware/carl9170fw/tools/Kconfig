@@ -1,0 +1,12 @@
+menu "Firmware Tools"
+
+config CARL9170FW_BUILD_TOOLS
+	def_bool y
+	prompt "Build Firmware Tools"
+
+config CARL9170FW_BUILD_TOOLS_CARLU
+	def_bool n
+	prompt "Build CARLU testbench"
+	depends on CARL9170FW_BUILD_TOOLS
+
+endmenu

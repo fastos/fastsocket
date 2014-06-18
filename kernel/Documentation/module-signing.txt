@@ -1,0 +1,147 @@
+			==============================
+			KERNEL MODULE SIGNING FACILITY
+			==============================
+
+The module signing facility applies cryptographic signature checking to modules
+on module load, checking the signature against a ring of public keys compiled
+into the kernel.  GPG is used to do the cryptographic work and determines the
+format of the signature and key data.  The facility uses GPG's MPI library to
+handle the huge numbers involved.
+
+This facility is enabled through CONFIG_MODULE_SIG.  Turning on signature
+checking will also force the module's ELF metadata to be verified before the
+signature is checked.
+
+
+=====================
+SUPPLYING PUBLIC KEYS
+=====================
+
+A set of public keys must be supplied at main kernel compile time.  This is
+done by taking a GPG public key file, running it through the kernel's bin2c
+program and writing the result over crypto/signature/key.h.  To automate this
+process, something like this could be done:
+
+	cat >genkey <<EOF
+	%pubring kernel.pub
+	%secring kernel.sec
+	Key-Type: DSA
+	Key-Length: 512
+	Name-Real: A. N. Other
+	Name-Comment: Kernel Module GPG key
+	%commit
+	EOF
+	make scripts/bin2c
+	gpg --homedir . --batch --gen-key genkey
+	gpg --homedir . --export --keyring kernel.pub keyname |
+	 scripts/bin2c ksign_def_public_key __initdata >crypto/signature/key.h
+
+The above generates fresh keys using /dev/random.  If there's insufficient data
+in /dev/random, more can be provided more by running:
+
+	rngd -r /dev/urandom
+
+in the background.
+
+Note:
+
+ (1) That "keyname" is the name of the key in the keyring.  This differentiates
+     it from any other keys that may be added to the keyring.
+
+ (2) That no GPG password is used in the above scriptlet.
+
+
+==============
+MODULE SIGNING
+==============
+
+Modules will then be signed automatically.  The kernel make command line can
+include the following options:
+
+ (*) MODSECKEY=<secret-key-ring-path>
+
+     This indicates the whereabouts of the GPG keyring that is the source of
+     the secret key to be used.  The default is "./kernel.sec".
+
+ (*) MODPUBKEY=<public-key-ring-path>
+
+     This indicates the whereabouts of the GPG keyring that is the source of
+     the public key to be used.  The default is "./kernel.pub".
+
+ (*) MODKEYNAME=<key-name>
+
+     The name of the key pair to be used from the aforementioned keyrings.
+     This defaults to being unset, thus leaving the choice of default key to
+     gpg.
+
+ (*) KEYFLAGS="gpg-options"
+
+     Override the complete gpg command line, including the preceding three
+     options.  The default options supplied to gpg are:
+
+	--no-default-keyring
+	--secret-keyring $(MODSECKEY)
+	--keyring $(MODPUBKEY)
+	--no-default-keyring
+	--homedir .
+	--no-options
+	--no-auto-check-trustdb
+	--no-permission-warning
+
+      with:
+
+	--default-key $(MODKEYNAME)
+
+      being added if requested.
+
+The resulting module.ko file will be the signed module.
+
+
+========================
+STRIPPING SIGNED MODULES
+========================
+
+Signed modules may be safely stripped as the signature only covers those parts
+of the module the kernel actually uses and any ELF metadata required to deal
+with them.  Any necessary ELF metadata that is affected by stripping is
+canonicalised by the sig generator and the sig checker to hide strip effects.
+
+This permits the debuginfo to be detached from the module and placed in another
+spot so that gdb can find it when referring to that module without the need for
+multiple signed versions of the module.  Such is done by rpmbuild when
+producing RPMs.
+
+It also permits the module to be stripped as far as possible for when modules
+are being reduced prior to being included in an initial ramdisk composition.
+
+
+======================
+LOADING SIGNED MODULES
+======================
+
+Modules are loaded with insmod, exactly as for unsigned modules.  The signature
+is inserted into the module object file as an ELF section called ".module_sig".
+The signature checker will spot it and apply signature checking.
+
+
+=========================================
+NON-VALID SIGNATURES AND UNSIGNED MODULES
+=========================================
+
+If CONFIG_MODULE_SIG_FORCE is enabled or "enforcemodulesig=1" is supplied on
+the kernel command line, the kernel will _only_ load validly signed modules
+for which it has a public key.  Otherwise, it will also load modules that are
+unsigned.  Any module for which the kernel has a key, but which proves to have
+a signature mismatch will not be permitted to load (returning EKEYREJECTED).
+
+This table indicates the behaviours of the various situations:
+
+	MODULE STATE			PERMISSIVE MODE	ENFORCING MODE
+	===============================	===============	===============
+	Unsigned			Ok		EKEYREJECTED
+	Signed, no public key		ENOKEY		ENOKEY
+	Validly signed, public key	Ok		Ok
+	Invalidly signed, public key	EKEYREJECTED	EKEYREJECTED
+	Validly signed, expired key	EKEYEXPIRED	EKEYEXPIRED
+	Corrupt signature		ELIBBAD		ELIBBAD
+	Corrupt ELF			ELIBBAD		ELIBBAD

@@ -1,0 +1,51 @@
+menu "SoC Audio support for SuperH"
+	depends on SUPERH
+
+config SND_SOC_PCM_SH7760
+	tristate "SoC Audio support for Renesas SH7760"
+	depends on CPU_SUBTYPE_SH7760 && SH_DMABRG
+	help
+	  Enable this option for SH7760 AC97/I2S audio support.
+
+
+##
+## Audio unit modules
+##
+
+config SND_SOC_SH4_HAC
+	tristate
+	select AC97_BUS
+	select SND_SOC_AC97_BUS
+
+config SND_SOC_SH4_SSI
+	tristate
+
+config SND_SOC_SH4_FSI
+	tristate "SH4 FSI support"
+	depends on CPU_SUBTYPE_SH7724
+        select SH_DMA
+	help
+	  This option enables FSI sound support
+
+##
+## Boards
+##
+
+config SND_SH7760_AC97
+	tristate "SH7760 AC97 sound support"
+	depends on CPU_SUBTYPE_SH7760 && SND_SOC_PCM_SH7760
+	select SND_SOC_SH4_HAC
+	select SND_SOC_AC97_CODEC
+	help
+	  This option enables generic sound support for the first
+	  AC97 unit of the SH7760.
+
+config SND_FSI_AK4642
+	bool "FSI-AK4642 sound support"
+	depends on SND_SOC_SH4_FSI
+	select SND_SOC_AK4642
+	help
+	  This option enables generic sound support for the
+	  FSI - AK4642 unit
+
+endmenu

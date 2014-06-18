@@ -1,0 +1,9 @@
+# scsi.h should not be exported.  Currently, sdparm and sg3_utils use scsi.h
+# that glibc-headers provides.  Upstream will sort this out and RHEL6 will
+# take the change, provided that it doesn't break kabi.  Unexport scsi.h from
+# the kernel in RHEL6.
+#header-y += scsi.h
+header-y += scsi_netlink.h
+header-y += scsi_netlink_fc.h
+header-y += scsi_bsg_fc.h
+header-y += fc/

@@ -1,0 +1,37 @@
+menu "USB Firmware Configuration Settings"
+
+config CARL9170FW_USB_STANDARD_CMDS
+	def_bool y
+	prompt "Basic USB Interface"
+	---help---
+	 Allows the device to be queried about Standard USB 2.0 Device
+	 Description Descriptors.
+
+	 Say Y, unless you don't care if lsusb -v fails.
+
+config CARL9170FW_USB_UP_STREAM
+	def_bool y
+	prompt "USB Upload Stream"
+	---help---
+	 This features allows the USB silicon to combine small, single
+	 frames into bigger transfers. This can help to reduce
+	 some per-transfer overhead in the application.
+
+	 Say Y, unless you have experienced strange rx corruptions.
+
+config CARL9170FW_USB_DN_STREAM
+	def_bool n
+	prompt "USB Download Stream"
+
+config CARL9170FW_DEBUG_USB
+	def_bool y
+	prompt "Pass debug messages through USB transport"
+	---help---
+	 Report all firmware messages through the USB transport.
+	 But there is a catch: In case of a BUG, the USB transport
+	 needs to be functional, otherwise the application won't
+	 receive anything.
+
+	 Say Y.
+
+endmenu

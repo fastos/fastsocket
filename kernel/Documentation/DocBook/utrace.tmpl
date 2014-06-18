@@ -1,0 +1,590 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE book PUBLIC "-//OASIS//DTD DocBook XML V4.1.2//EN"
+"http://www.oasis-open.org/docbook/xml/4.1.2/docbookx.dtd" []>
+
+<book id="utrace">
+  <bookinfo>
+    <title>The utrace User Debugging Infrastructure</title>
+  </bookinfo>
+
+  <toc></toc>
+
+  <chapter id="concepts"><title>utrace concepts</title>
+
+  <sect1 id="intro"><title>Introduction</title>
+
+  <para>
+    <application>utrace</application> is infrastructure code for tracing
+    and controlling user threads.  This is the foundation for writing
+    tracing engines, which can be loadable kernel modules.
+  </para>
+
+  <para>
+    The basic actors in <application>utrace</application> are the thread
+    and the tracing engine.  A tracing engine is some body of code that
+    calls into the <filename>&lt;linux/utrace.h&gt;</filename>
+    interfaces, represented by a <structname>struct
+    utrace_engine_ops</structname>.  (Usually it's a kernel module,
+    though the legacy <function>ptrace</function> support is a tracing
+    engine that is not in a kernel module.)  The interface operates on
+    individual threads (<structname>struct task_struct</structname>).
+    If an engine wants to treat several threads as a group, that is up
+    to its higher-level code.
+  </para>
+
+  <para>
+    Tracing begins by attaching an engine to a thread, using
+    <function>utrace_attach_task</function> or
+    <function>utrace_attach_pid</function>.  If successful, it returns a
+    pointer that is the handle used in all other calls.
+  </para>
+
+  </sect1>
+
+  <sect1 id="callbacks"><title>Events and Callbacks</title>
+
+  <para>
+    An attached engine does nothing by default.  An engine makes something
+    happen by requesting callbacks via <function>utrace_set_events</function>
+    and poking the thread with <function>utrace_control</function>.
+    The synchronization issues related to these two calls
+    are discussed further below in <xref linkend="teardown"/>.
+  </para>
+
+  <para>
+    Events are specified using the macro
+    <constant>UTRACE_EVENT(<replaceable>type</replaceable>)</constant>.
+    Each event type is associated with a callback in <structname>struct
+    utrace_engine_ops</structname>.  A tracing engine can leave unused
+    callbacks <constant>NULL</constant>.  The only callbacks required
+    are those used by the event flags it sets.
+  </para>
+
+  <para>
+    Many engines can be attached to each thread.  When a thread has an
+    event, each engine gets a callback if it has set the event flag for
+    that event type.  For most events, engines are called in the order they
+    attached.  Engines that attach after the event has occurred do not get
+    callbacks for that event.  This includes any new engines just attached
+    by an existing engine's callback function.  Once the sequence of
+    callbacks for that one event has completed, such new engines are then
+    eligible in the next sequence that starts when there is another event.
+  </para>
+
+  <para>
+    Event reporting callbacks have details particular to the event type,
+    but are all called in similar environments and have the same
+    constraints.  Callbacks are made from safe points, where no locks
+    are held, no special resources are pinned (usually), and the
+    user-mode state of the thread is accessible.  So, callback code has
+    a pretty free hand.  But to be a good citizen, callback code should
+    never block for long periods.  It is fine to block in
+    <function>kmalloc</function> and the like, but never wait for i/o or
+    for user mode to do something.  If you need the thread to wait, use
+    <constant>UTRACE_STOP</constant> and return from the callback
+    quickly.  When your i/o finishes or whatever, you can use
+    <function>utrace_control</function> to resume the thread.
+  </para>
+
+  <para>
+    The <constant>UTRACE_EVENT(SYSCALL_ENTRY)</constant> event is a special
+    case.  While other events happen in the kernel when it will return to
+    user mode soon, this event happens when entering the kernel before it
+    will proceed with the work requested from user mode.  Because of this
+    difference, the <function>report_syscall_entry</function> callback is
+    special in two ways.  For this event, engines are called in reverse of
+    the normal order (this includes the <function>report_quiesce</function>
+    call that precedes a <function>report_syscall_entry</function> call).
+    This preserves the semantics that the last engine to attach is called
+    "closest to user mode"--the engine that is first to see a thread's user
+    state when it enters the kernel is also the last to see that state when
+    the thread returns to user mode.  For the same reason, if these
+    callbacks use <constant>UTRACE_STOP</constant> (see the next section),
+    the thread stops immediately after callbacks rather than only when it's
+    ready to return to user mode; when allowed to resume, it will actually
+    attempt the system call indicated by the register values at that time.
+  </para>
+
+  </sect1>
+
+  <sect1 id="safely"><title>Stopping Safely</title>
+
+  <sect2 id="well-behaved"><title>Writing well-behaved callbacks</title>
+
+  <para>
+    Well-behaved callbacks are important to maintain two essential
+    properties of the interface.  The first of these is that unrelated
+    tracing engines should not interfere with each other.  If your engine's
+    event callback does not return quickly, then another engine won't get
+    the event notification in a timely manner.  The second important
+    property is that tracing should be as noninvasive as possible to the
+    normal operation of the system overall and of the traced thread in
+    particular.  That is, attached tracing engines should not perturb a
+    thread's behavior, except to the extent that changing its user-visible
+    state is explicitly what you want to do.  (Obviously some perturbation
+    is unavoidable, primarily timing changes, ranging from small delays due
+    to the overhead of tracing, to arbitrary pauses in user code execution
+    when a user stops a thread with a debugger for examination.)  Even when
+    you explicitly want the perturbation of making the traced thread block,
+    just blocking directly in your callback has more unwanted effects.  For
+    example, the <constant>CLONE</constant> event callbacks are called when
+    the new child thread has been created but not yet started running; the
+    child can never be scheduled until the <constant>CLONE</constant>
+    tracing callbacks return.  (This allows engines tracing the parent to
+    attach to the child.)  If a <constant>CLONE</constant> event callback
+    blocks the parent thread, it also prevents the child thread from
+    running (even to process a <constant>SIGKILL</constant>).  If what you
+    want is to make both the parent and child block, then use
+    <function>utrace_attach_task</function> on the child and then use
+    <constant>UTRACE_STOP</constant> on both threads.  A more crucial
+    problem with blocking in callbacks is that it can prevent
+    <constant>SIGKILL</constant> from working.  A thread that is blocking
+    due to <constant>UTRACE_STOP</constant> will still wake up and die
+    immediately when sent a <constant>SIGKILL</constant>, as all threads
+    should.  Relying on the <application>utrace</application>
+    infrastructure rather than on private synchronization calls in event
+    callbacks is an important way to help keep tracing robustly
+    noninvasive.
+  </para>
+
+  </sect2>
+
+  <sect2 id="UTRACE_STOP"><title>Using <constant>UTRACE_STOP</constant></title>
+
+  <para>
+    To control another thread and access its state, it must be stopped
+    with <constant>UTRACE_STOP</constant>.  This means that it is
+    stopped and won't start running again while we access it.  When a
+    thread is not already stopped, <function>utrace_control</function>
+    returns <constant>-EINPROGRESS</constant> and an engine must wait
+    for an event callback when the thread is ready to stop.  The thread
+    may be running on another CPU or may be blocked.  When it is ready
+    to be examined, it will make callbacks to engines that set the
+    <constant>UTRACE_EVENT(QUIESCE)</constant> event bit.  To wake up an
+    interruptible wait, use <constant>UTRACE_INTERRUPT</constant>.
+  </para>
+
+  <para>
+    As long as some engine has used <constant>UTRACE_STOP</constant> and
+    not called <function>utrace_control</function> to resume the thread,
+    then the thread will remain stopped.  <constant>SIGKILL</constant>
+    will wake it up, but it will not run user code.  When the stop is
+    cleared with <function>utrace_control</function> or a callback
+    return value, the thread starts running again.
+    (See also <xref linkend="teardown"/>.)
+  </para>
+
+  </sect2>
+
+  </sect1>
+
+  <sect1 id="teardown"><title>Tear-down Races</title>
+
+  <sect2 id="SIGKILL"><title>Primacy of <constant>SIGKILL</constant></title>
+  <para>
+    Ordinarily synchronization issues for tracing engines are kept fairly
+    straightforward by using <constant>UTRACE_STOP</constant>.  You ask a
+    thread to stop, and then once it makes the
+    <function>report_quiesce</function> callback it cannot do anything else
+    that would result in another callback, until you let it with a
+    <function>utrace_control</function> call.  This simple arrangement
+    avoids complex and error-prone code in each one of a tracing engine's
+    event callbacks to keep them serialized with the engine's other
+    operations done on that thread from another thread of control.
+    However, giving tracing engines complete power to keep a traced thread
+    stuck in place runs afoul of a more important kind of simplicity that
+    the kernel overall guarantees: nothing can prevent or delay
+    <constant>SIGKILL</constant> from making a thread die and release its
+    resources.  To preserve this important property of
+    <constant>SIGKILL</constant>, it as a special case can break
+    <constant>UTRACE_STOP</constant> like nothing else normally can.  This
+    includes both explicit <constant>SIGKILL</constant> signals and the
+    implicit <constant>SIGKILL</constant> sent to each other thread in the
+    same thread group by a thread doing an exec, or processing a fatal
+    signal, or making an <function>exit_group</function> system call.  A
+    tracing engine can prevent a thread from beginning the exit or exec or
+    dying by signal (other than <constant>SIGKILL</constant>) if it is
+    attached to that thread, but once the operation begins, no tracing
+    engine can prevent or delay all other threads in the same thread group
+    dying.
+  </para>
+  </sect2>
+
+  <sect2 id="reap"><title>Final callbacks</title>
+  <para>
+    The <function>report_reap</function> callback is always the final event
+    in the life cycle of a traced thread.  Tracing engines can use this as
+    the trigger to clean up their own data structures.  The
+    <function>report_death</function> callback is always the penultimate
+    event a tracing engine might see; it's seen unless the thread was
+    already in the midst of dying when the engine attached.  Many tracing
+    engines will have no interest in when a parent reaps a dead process,
+    and nothing they want to do with a zombie thread once it dies; for
+    them, the <function>report_death</function> callback is the natural
+    place to clean up data structures and detach.  To facilitate writing
+    such engines robustly, given the asynchrony of
+    <constant>SIGKILL</constant>, and without error-prone manual
+    implementation of synchronization schemes, the
+    <application>utrace</application> infrastructure provides some special
+    guarantees about the <function>report_death</function> and
+    <function>report_reap</function> callbacks.  It still takes some care
+    to be sure your tracing engine is robust to tear-down races, but these
+    rules make it reasonably straightforward and concise to handle a lot of
+    corner cases correctly.
+  </para>
+  </sect2>
+
+  <sect2 id="refcount"><title>Engine and task pointers</title>
+  <para>
+    The first sort of guarantee concerns the core data structures
+    themselves.  <structname>struct utrace_engine</structname> is
+    a reference-counted data structure.  While you hold a reference, an
+    engine pointer will always stay valid so that you can safely pass it to
+    any <application>utrace</application> call.  Each call to
+    <function>utrace_attach_task</function> or
+    <function>utrace_attach_pid</function> returns an engine pointer with a
+    reference belonging to the caller.  You own that reference until you
+    drop it using <function>utrace_engine_put</function>.  There is an
+    implicit reference on the engine while it is attached.  So if you drop
+    your only reference, and then use
+    <function>utrace_attach_task</function> without
+    <constant>UTRACE_ATTACH_CREATE</constant> to look up that same engine,
+    you will get the same pointer with a new reference to replace the one
+    you dropped, just like calling <function>utrace_engine_get</function>.
+    When an engine has been detached, either explicitly with
+    <constant>UTRACE_DETACH</constant> or implicitly after
+    <function>report_reap</function>, then any references you hold are all
+    that keep the old engine pointer alive.
+  </para>
+
+  <para>
+    There is nothing a kernel module can do to keep a <structname>struct
+    task_struct</structname> alive outside of
+    <function>rcu_read_lock</function>.  When the task dies and is reaped
+    by its parent (or itself), that structure can be freed so that any
+    dangling pointers you have stored become invalid.
+    <application>utrace</application> will not prevent this, but it can
+    help you detect it safely.  By definition, a task that has been reaped
+    has had all its engines detached.  All
+    <application>utrace</application> calls can be safely called on a
+    detached engine if the caller holds a reference on that engine pointer,
+    even if the task pointer passed in the call is invalid.  All calls
+    return <constant>-ESRCH</constant> for a detached engine, which tells
+    you that the task pointer you passed could be invalid now.  Since
+    <function>utrace_control</function> and
+    <function>utrace_set_events</function> do not block, you can call those
+    inside a <function>rcu_read_lock</function> section and be sure after
+    they don't return <constant>-ESRCH</constant> that the task pointer is
+    still valid until <function>rcu_read_unlock</function>.  The
+    infrastructure never holds task references of its own.  Though neither
+    <function>rcu_read_lock</function> nor any other lock is held while
+    making a callback, it's always guaranteed that the <structname>struct
+    task_struct</structname> and the <structname>struct
+    utrace_engine</structname> passed as arguments remain valid
+    until the callback function returns.
+  </para>
+
+  <para>
+    The common means for safely holding task pointers that is available to
+    kernel modules is to use <structname>struct pid</structname>, which
+    permits <function>put_pid</function> from kernel modules.  When using
+    that, the calls <function>utrace_attach_pid</function>,
+    <function>utrace_control_pid</function>,
+    <function>utrace_set_events_pid</function>, and
+    <function>utrace_barrier_pid</function> are available.
+  </para>
+  </sect2>
+
+  <sect2 id="reap-after-death">
+    <title>
+      Serialization of <constant>DEATH</constant> and <constant>REAP</constant>
+    </title>
+    <para>
+      The second guarantee is the serialization of
+      <constant>DEATH</constant> and <constant>REAP</constant> event
+      callbacks for a given thread.  The actual reaping by the parent
+      (<function>release_task</function> call) can occur simultaneously
+      while the thread is still doing the final steps of dying, including
+      the <function>report_death</function> callback.  If a tracing engine
+      has requested both <constant>DEATH</constant> and
+      <constant>REAP</constant> event reports, it's guaranteed that the
+      <function>report_reap</function> callback will not be made until
+      after the <function>report_death</function> callback has returned.
+      If the <function>report_death</function> callback itself detaches
+      from the thread, then the <function>report_reap</function> callback
+      will never be made.  Thus it is safe for a
+      <function>report_death</function> callback to clean up data
+      structures and detach.
+    </para>
+  </sect2>
+
+  <sect2 id="interlock"><title>Interlock with final callbacks</title>
+  <para>
+    The final sort of guarantee is that a tracing engine will know for sure
+    whether or not the <function>report_death</function> and/or
+    <function>report_reap</function> callbacks will be made for a certain
+    thread.  These tear-down races are disambiguated by the error return
+    values of <function>utrace_set_events</function> and
+    <function>utrace_control</function>.  Normally
+    <function>utrace_control</function> called with
+    <constant>UTRACE_DETACH</constant> returns zero, and this means that no
+    more callbacks will be made.  If the thread is in the midst of dying,
+    it returns <constant>-EALREADY</constant> to indicate that the
+    <constant>report_death</constant> callback may already be in progress;
+    when you get this error, you know that any cleanup your
+    <function>report_death</function> callback does is about to happen or
+    has just happened--note that if the <function>report_death</function>
+    callback does not detach, the engine remains attached until the thread
+    gets reaped.  If the thread is in the midst of being reaped,
+    <function>utrace_control</function> returns <constant>-ESRCH</constant>
+    to indicate that the <function>report_reap</function> callback may
+    already be in progress; this means the engine is implicitly detached
+    when the callback completes.  This makes it possible for a tracing
+    engine that has decided asynchronously to detach from a thread to
+    safely clean up its data structures, knowing that no
+    <function>report_death</function> or <function>report_reap</function>
+    callback will try to do the same.  <constant>utrace_detach</constant>
+    returns <constant>-ESRCH</constant> when the <structname>struct
+    utrace_engine</structname> has already been detached, but is
+    still a valid pointer because of its reference count.  A tracing engine
+    can use this to safely synchronize its own independent multiple threads
+    of control with each other and with its event callbacks that detach.
+  </para>
+
+  <para>
+    In the same vein, <function>utrace_set_events</function> normally
+    returns zero; if the target thread was stopped before the call, then
+    after a successful call, no event callbacks not requested in the new
+    flags will be made.  It fails with <constant>-EALREADY</constant> if
+    you try to clear <constant>UTRACE_EVENT(DEATH)</constant> when the
+    <function>report_death</function> callback may already have begun, if
+    you try to clear <constant>UTRACE_EVENT(REAP)</constant> when the
+    <function>report_reap</function> callback may already have begun, or if
+    you try to newly set <constant>UTRACE_EVENT(DEATH)</constant> or
+    <constant>UTRACE_EVENT(QUIESCE)</constant> when the target is already
+    dead or dying.  Like <function>utrace_control</function>, it returns
+    <constant>-ESRCH</constant> when the thread has already been detached
+    (including forcible detach on reaping).  This lets the tracing engine
+    know for sure which event callbacks it will or won't see after
+    <function>utrace_set_events</function> has returned.  By checking for
+    errors, it can know whether to clean up its data structures immediately
+    or to let its callbacks do the work.
+  </para>
+  </sect2>
+
+  <sect2 id="barrier"><title>Using <function>utrace_barrier</function></title>
+  <para>
+    When a thread is safely stopped, calling
+    <function>utrace_control</function> with <constant>UTRACE_DETACH</constant>
+    or calling <function>utrace_set_events</function> to disable some events
+    ensures synchronously that your engine won't get any more of the callbacks
+    that have been disabled (none at all when detaching).  But these can also
+    be used while the thread is not stopped, when it might be simultaneously
+    making a callback to your engine.  For this situation, these calls return
+    <constant>-EINPROGRESS</constant> when it's possible a callback is in
+    progress.  If you are not prepared to have your old callbacks still run,
+    then you can synchronize to be sure all the old callbacks are finished,
+    using <function>utrace_barrier</function>.  This is necessary if the
+    kernel module containing your callback code is going to be unloaded.
+  </para>
+  <para>
+    After using <constant>UTRACE_DETACH</constant> once, further calls to
+    <function>utrace_control</function> with the same engine pointer will
+    return <constant>-ESRCH</constant>.  In contrast, after getting
+    <constant>-EINPROGRESS</constant> from
+    <function>utrace_set_events</function>, you can call
+    <function>utrace_set_events</function> again later and if it returns zero
+    then know the old callbacks have finished.
+  </para>
+  <para>
+    Unlike all other calls, <function>utrace_barrier</function> (and
+    <function>utrace_barrier_pid</function>) will accept any engine pointer you
+    hold a reference on, even if <constant>UTRACE_DETACH</constant> has already
+    been used.  After any <function>utrace_control</function> or
+    <function>utrace_set_events</function> call (these do not block), you can
+    call <function>utrace_barrier</function> to block until callbacks have
+    finished.  This returns <constant>-ESRCH</constant> only if the engine is
+    completely detached (finished all callbacks).  Otherwise it waits
+    until the thread is definitely not in the midst of a callback to this
+    engine and then returns zero, but can return
+    <constant>-ERESTARTSYS</constant> if its wait is interrupted.
+  </para>
+  </sect2>
+
+</sect1>
+
+</chapter>
+
+<chapter id="core"><title>utrace core API</title>
+
+<para>
+  The utrace API is declared in <filename>&lt;linux/utrace.h&gt;</filename>.
+</para>
+
+!Iinclude/linux/utrace.h
+!Ekernel/utrace.c
+
+</chapter>
+
+<chapter id="machine"><title>Machine State</title>
+
+<para>
+  The <function>task_current_syscall</function> function can be used on any
+  valid <structname>struct task_struct</structname> at any time, and does
+  not even require that <function>utrace_attach_task</function> was used at all.
+</para>
+
+<para>
+  The other ways to access the registers and other machine-dependent state of
+  a task can only be used on a task that is at a known safe point.  The safe
+  points are all the places where <function>utrace_set_events</function> can
+  request callbacks (except for the <constant>DEATH</constant> and
+  <constant>REAP</constant> events).  So at any event callback, it is safe to
+  examine <varname>current</varname>.
+</para>
+
+<para>
+  One task can examine another only after a callback in the target task that
+  returns <constant>UTRACE_STOP</constant> so that task will not return to user
+  mode after the safe point.  This guarantees that the task will not resume
+  until the same engine uses <function>utrace_control</function>, unless the
+  task dies suddenly.  To examine safely, one must use a pair of calls to
+  <function>utrace_prepare_examine</function> and
+  <function>utrace_finish_examine</function> surrounding the calls to
+  <structname>struct user_regset</structname> functions or direct examination
+  of task data structures.  <function>utrace_prepare_examine</function> returns
+  an error if the task is not properly stopped, or is dead.  After a
+  successful examination, the paired <function>utrace_finish_examine</function>
+  call returns an error if the task ever woke up during the examination.  If
+  so, any data gathered may be scrambled and should be discarded.  This means
+  there was a spurious wake-up (which should not happen), or a sudden death.
+</para>
+
+<sect1 id="regset"><title><structname>struct user_regset</structname></title>
+
+<para>
+  The <structname>struct user_regset</structname> API
+  is declared in <filename>&lt;linux/regset.h&gt;</filename>.
+</para>
+
+!Finclude/linux/regset.h
+
+</sect1>
+
+<sect1 id="task_current_syscall">
+  <title><filename>System Call Information</filename></title>
+
+<para>
+  This function is declared in <filename>&lt;linux/ptrace.h&gt;</filename>.
+</para>
+
+!Elib/syscall.c
+
+</sect1>
+
+<sect1 id="syscall"><title><filename>System Call Tracing</filename></title>
+
+<para>
+  The arch API for system call information is declared in
+  <filename>&lt;asm/syscall.h&gt;</filename>.
+  Each of these calls can be used only at system call entry tracing,
+  or can be used only at system call exit and the subsequent safe points
+  before returning to user mode.
+  At system call entry tracing means either during a
+  <structfield>report_syscall_entry</structfield> callback,
+  or any time after that callback has returned <constant>UTRACE_STOP</constant>.
+</para>
+
+!Finclude/asm-generic/syscall.h
+
+</sect1>
+
+</chapter>
+
+<chapter id="internals"><title>Kernel Internals</title>
+
+<para>
+  This chapter covers the interface to the tracing infrastructure
+  from the core of the kernel and the architecture-specific code.
+  This is for maintainers of the kernel and arch code, and not relevant
+  to using the tracing facilities described in preceding chapters.
+</para>
+
+<sect1 id="tracehook"><title>Core Calls In</title>
+
+<para>
+  These calls are declared in <filename>&lt;linux/tracehook.h&gt;</filename>.
+  The core kernel calls these functions at various important places.
+</para>
+
+!Finclude/linux/tracehook.h
+
+</sect1>
+
+<sect1 id="arch"><title>Architecture Calls Out</title>
+
+<para>
+  An arch that has done all these things sets
+  <constant>CONFIG_HAVE_ARCH_TRACEHOOK</constant>.
+  This is required to enable the <application>utrace</application> code.
+</para>
+
+<sect2 id="arch-ptrace"><title><filename>&lt;asm/ptrace.h&gt;</filename></title>
+
+<para>
+  An arch defines these in <filename>&lt;asm/ptrace.h&gt;</filename>
+  if it supports hardware single-step or block-step features.
+</para>
+
+!Finclude/linux/ptrace.h arch_has_single_step arch_has_block_step
+!Finclude/linux/ptrace.h user_enable_single_step user_enable_block_step
+!Finclude/linux/ptrace.h user_disable_single_step
+
+</sect2>
+
+<sect2 id="arch-syscall">
+  <title><filename>&lt;asm/syscall.h&gt;</filename></title>
+
+  <para>
+    An arch provides <filename>&lt;asm/syscall.h&gt;</filename> that
+    defines these as inlines, or declares them as exported functions.
+    These interfaces are described in <xref linkend="syscall"/>.
+  </para>
+
+</sect2>
+
+<sect2 id="arch-tracehook">
+  <title><filename>&lt;linux/tracehook.h&gt;</filename></title>
+
+  <para>
+    An arch must define <constant>TIF_NOTIFY_RESUME</constant>
+    and <constant>TIF_SYSCALL_TRACE</constant>
+    in its <filename>&lt;asm/thread_info.h&gt;</filename>.
+    The arch code must call the following functions, all declared
+    in <filename>&lt;linux/tracehook.h&gt;</filename> and
+    described in <xref linkend="tracehook"/>:
+
+    <itemizedlist>
+      <listitem>
+	<para><function>tracehook_notify_resume</function></para>
+      </listitem>
+      <listitem>
+	<para><function>tracehook_report_syscall_entry</function></para>
+      </listitem>
+      <listitem>
+	<para><function>tracehook_report_syscall_exit</function></para>
+      </listitem>
+      <listitem>
+	<para><function>tracehook_signal_handler</function></para>
+      </listitem>
+    </itemizedlist>
+
+  </para>
+
+</sect2>
+
+</sect1>
+
+</chapter>
+
+</book>

@@ -1,0 +1,269 @@
+#
+# Misc strange devices
+#
+
+menuconfig MISC_DEVICES
+	bool "Misc devices"
+	default y
+	---help---
+	  Say Y here to get to see options for device drivers from various
+	  different categories. This option alone does not add any kernel code.
+
+	  If you say N, all options in this submenu will be skipped and disabled.
+
+if MISC_DEVICES
+
+config ATMEL_PWM
+	tristate "Atmel AT32/AT91 PWM support"
+	depends on AVR32 || ARCH_AT91SAM9263 || ARCH_AT91SAM9RL || ARCH_AT91CAP9
+	help
+	  This option enables device driver support for the PWM channels
+	  on certain Atmel processors.  Pulse Width Modulation is used for
+	  purposes including software controlled power-efficient backlights
+	  on LCD displays, motor control, and waveform generation.
+
+config ATMEL_TCLIB
+	bool "Atmel AT32/AT91 Timer/Counter Library"
+	depends on (AVR32 || ARCH_AT91)
+	help
+	  Select this if you want a library to allocate the Timer/Counter
+	  blocks found on many Atmel processors.  This facilitates using
+	  these blocks by different drivers despite processor differences.
+
+config ATMEL_TCB_CLKSRC
+	bool "TC Block Clocksource"
+	depends on ATMEL_TCLIB
+	default y
+	help
+	  Select this to get a high precision clocksource based on a
+	  TC block with a 5+ MHz base clock rate.  Two timer channels
+	  are combined to make a single 32-bit timer.
+
+	  When GENERIC_CLOCKEVENTS is defined, the third timer channel
+	  may be used as a clock event device supporting oneshot mode
+	  (delays of up to two seconds) based on the 32 KiHz clock.
+
+config ATMEL_TCB_CLKSRC_BLOCK
+	int
+	depends on ATMEL_TCB_CLKSRC
+	prompt "TC Block" if ARCH_AT91RM9200 || ARCH_AT91SAM9260 || CPU_AT32AP700X
+	default 0
+	range 0 1
+	help
+	  Some chips provide more than one TC block, so you have the
+	  choice of which one to use for the clock framework.  The other
+	  TC can be used for other purposes, such as PWM generation and
+	  interval timing.
+
+config IBM_ASM
+	tristate "Device driver for IBM RSA service processor"
+	depends on X86 && PCI && INPUT && EXPERIMENTAL
+	---help---
+	  This option enables device driver support for in-band access to the
+	  IBM RSA (Condor) service processor in eServer xSeries systems.
+	  The ibmasm device driver allows user space application to access
+	  ASM (Advanced Systems Management) functions on the service
+	  processor. The driver is meant to be used in conjunction with
+	  a user space API.
+	  The ibmasm driver also enables the OS to use the UART on the
+	  service processor board as a regular serial port. To make use of
+	  this feature serial driver support (CONFIG_SERIAL_8250) must be
+	  enabled.
+
+	  WARNING: This software may not be supported or function
+	  correctly on your IBM server. Please consult the IBM ServerProven
+	  website <http://www.pc.ibm.com/ww/eserver/xseries/serverproven> for
+	  information on the specific driver level and support statement
+	  for your IBM server.
+
+config PHANTOM
+	tristate "Sensable PHANToM (PCI)"
+	depends on PCI
+	help
+	  Say Y here if you want to build a driver for Sensable PHANToM device.
+
+	  This driver is only for PCI PHANToMs.
+
+	  If you choose to build module, its name will be phantom. If unsure,
+	  say N here.
+
+config SGI_IOC4
+	tristate "SGI IOC4 Base IO support"
+	depends on PCI
+	---help---
+	  This option enables basic support for the IOC4 chip on certain
+	  SGI IO controller cards (IO9, IO10, and PCI-RT).  This option
+	  does not enable any specific functions on such a card, but provides
+	  necessary infrastructure for other drivers to utilize.
+
+	  If you have an SGI Altix with an IOC4-based card say Y.
+	  Otherwise say N.
+
+config TIFM_CORE
+	tristate "TI Flash Media interface support (EXPERIMENTAL)"
+	depends on EXPERIMENTAL && PCI
+	help
+	  If you want support for Texas Instruments(R) Flash Media adapters
+	  you should select this option and then also choose an appropriate
+	  host adapter, such as 'TI Flash Media PCI74xx/PCI76xx host adapter
+	  support', if you have a TI PCI74xx compatible card reader, for
+	  example.
+	  You will also have to select some flash card format drivers. MMC/SD
+	  cards are supported via 'MMC/SD Card support: TI Flash Media MMC/SD
+	  Interface support (MMC_TIFM_SD)'.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called tifm_core.
+
+config TIFM_7XX1
+	tristate "TI Flash Media PCI74xx/PCI76xx host adapter support (EXPERIMENTAL)"
+	depends on PCI && TIFM_CORE && EXPERIMENTAL
+	default TIFM_CORE
+	help
+	  This option enables support for Texas Instruments(R) PCI74xx and
+	  PCI76xx families of Flash Media adapters, found in many laptops.
+	  To make actual use of the device, you will have to select some
+	  flash card format drivers, as outlined in the TIFM_CORE Help.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called tifm_7xx1.
+
+config ICS932S401
+	tristate "Integrated Circuits ICS932S401"
+	depends on I2C && EXPERIMENTAL
+	help
+	  If you say yes here you get support for the Integrated Circuits
+	  ICS932S401 clock control chips.
+
+	  This driver can also be built as a module. If so, the module
+	  will be called ics932s401.
+
+config ATMEL_SSC
+	tristate "Device driver for Atmel SSC peripheral"
+	depends on AVR32 || ARCH_AT91
+	---help---
+	  This option enables device driver support for Atmel Synchronized
+	  Serial Communication peripheral (SSC).
+
+	  The SSC peripheral supports a wide variety of serial frame based
+	  communications, i.e. I2S, SPI, etc.
+
+	  If unsure, say N.
+
+config ENCLOSURE_SERVICES
+	tristate "Enclosure Services"
+	default n
+	help
+	  Provides support for intelligent enclosures (bays which
+	  contain storage devices).  You also need either a host
+	  driver (SCSI/ATA) which supports enclosures
+	  or a SCSI enclosure device (SES) to use these services.
+
+config SGI_XP
+	tristate "Support communication between SGI SSIs"
+	depends on NET
+	depends on (IA64_GENERIC || IA64_SGI_SN2 || IA64_SGI_UV || X86_UV) && SMP
+	select IA64_UNCACHED_ALLOCATOR if IA64_GENERIC || IA64_SGI_SN2
+	select GENERIC_ALLOCATOR if IA64_GENERIC || IA64_SGI_SN2
+	select SGI_GRU if X86_64 && SMP
+	---help---
+	  An SGI machine can be divided into multiple Single System
+	  Images which act independently of each other and have
+	  hardware based memory protection from the others.  Enabling
+	  this feature will allow for direct communication between SSIs
+	  based on a network adapter and DMA messaging.
+
+config HP_ILO
+	tristate "Channel interface driver for HP iLO/iLO2 processor"
+	depends on PCI
+	default n
+	help
+	  The channel interface driver allows applications to communicate
+	  with iLO/iLO2 management processors present on HP ProLiant
+	  servers.  Upon loading, the driver creates /dev/hpilo/dXccbN files,
+	  which can be used to gather data from the management processor,
+	  via read and write system calls.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called hpilo.
+
+config SGI_GRU
+	tristate "SGI GRU driver"
+	depends on X86_UV && SMP
+	default n
+	select MMU_NOTIFIER
+	---help---
+	The GRU is a hardware resource located in the system chipset. The GRU
+	contains memory that can be mmapped into the user address space. This memory is
+	used to communicate with the GRU to perform functions such as load/store,
+	scatter/gather, bcopy, AMOs, etc.  The GRU is directly accessed by user
+	instructions using user virtual addresses. GRU instructions (ex., bcopy) use
+	user virtual addresses for operands.
+
+	If you are not running on a SGI UV system, say N.
+
+config SGI_GRU_DEBUG
+	bool  "SGI GRU driver debug"
+	depends on SGI_GRU
+	default n
+	---help---
+	This option enables addition debugging code for the SGI GRU driver. If
+	you are unsure, say N.
+
+config DELL_LAPTOP
+	tristate "Dell Laptop Extras (EXPERIMENTAL)"
+	depends on X86
+	depends on DCDBAS
+	depends on EXPERIMENTAL
+	depends on BACKLIGHT_CLASS_DEVICE
+	depends on RFKILL
+	depends on POWER_SUPPLY
+	default n
+	---help---
+	This driver adds support for rfkill and backlight control to Dell
+	laptops.
+
+config ISL29003
+	tristate "Intersil ISL29003 ambient light sensor"
+	depends on I2C && SYSFS
+	help
+	  If you say yes here you get support for the Intersil ISL29003
+	  ambient light sensor.
+
+	  This driver can also be built as a module.  If so, the module
+	  will be called isl29003.
+
+config EP93XX_PWM
+	tristate "EP93xx PWM support"
+	depends on ARCH_EP93XX
+	help
+	  This option enables device driver support for the PWM channels
+	  on the Cirrus EP93xx processors.  The EP9307 chip only has one
+	  PWM channel all the others have two, the second channel is an
+	  alternate function of the EGPIO14 pin.  A sysfs interface is
+	  provided to control the PWM channels.
+
+	  To compile this driver as a module, choose M here: the module will
+	  be called ep93xx_pwm.
+
+config VMWARE_BALLOON
+	tristate "VMware Balloon Driver"
+	depends on X86
+	help
+	  This is VMware physical memory management driver which acts
+	  like a "balloon" that can be inflated to reclaim physical pages
+	  by reserving them in the guest and invalidating them in the
+	  monitor, freeing up the underlying machine pages so they can
+	  be allocated to other guests. The balloon can also be deflated
+	  to allow the guest to use more physical memory.
+
+	  If unsure, say N.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called vmware_balloon.
+
+source "drivers/misc/c2port/Kconfig"
+source "drivers/misc/eeprom/Kconfig"
+source "drivers/misc/cb710/Kconfig"
+
+endif # MISC_DEVICES

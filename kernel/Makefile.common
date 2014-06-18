@@ -1,0 +1,36 @@
+RPMBUILD := $(shell if [ -x "/usr/bin/rpmbuild" ]; then echo rpmbuild; \
+                   else echo rpm; fi)
+MACH :=  $(shell uname -m)
+KVERSION:=2.6.32
+# marker is git tag
+MARKER:=v2.6.32
+SPECFILE:=kernel.spec
+REDHAT:=$(shell pwd)
+LASTCOMMIT:=$(shell cat $(REDHAT)/lastcommit)
+CMARKER:=$(MARKER)
+RPM:=$(REDHAT)/rpm
+SRPMS:=$(RPM)/SRPMS
+SOURCES:=$(RPM)/SOURCES
+BUILD:=431
+#TARFILE:=$(subst _,.,$(MARKER)).tar.bz2
+TARFILE:=linux-$(KVERSION).tar.bz2
+TARBALL:=$(REDHAT)/$(TARFILE)
+TESTPATCH:=$(REDHAT)/linux-kernel-test.patch
+FILTERDIFF:=/usr/bin/filterdiff -x '*redhat/*' -x '*/.gitignore' -x '*/makefile'
+
+SUBLEVEL := $(shell echo $(MARKER) | cut -f 3 -d '.' | cut -f 1 -d '-')
+RCREV := $(shell echo $(MARKER) | cut -f 2 -d '-' -s | sed -e "s/rc//")
+GITREV := $(shell echo $(MARKER) | cut -f 3 -d '-' -s | sed -e "s/git//")
+
+ifneq ($(RCREV),)
+	RELEASED_KERNEL := 0
+	STAMP_VERSION := $(shell echo $(MARKER) | cut -f 1 -d '-' | sed -e "s/v//")
+	PREBUILD := "0."
+else
+	RELEASED_KERNEL := 1
+	STAMP_VERSION := $(KVERSION)
+	PREBUILD := ""
+endif
+RC_PATCH := patch-2.6.$(SUBLEVEL)-rc$(RCREV).bz2
+GIT_PATCH := patch-2.6.$(SUBLEVEL)-rc$(RCREV)-git$(GITREV).bz2
+

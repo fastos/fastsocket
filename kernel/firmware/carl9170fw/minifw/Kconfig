@@ -1,0 +1,3 @@
+config CARL9170FW_BUILD_MINIBOOT
+	def_bool y
+	prompt "Build MiniBoot Firmware Header"

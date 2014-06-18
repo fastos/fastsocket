@@ -1,0 +1,33 @@
+config BRCMUTIL
+	tristate
+
+config BRCMSMAC
+	tristate "Broadcom IEEE802.11n PCIe SoftMAC WLAN driver"
+	depends on MAC80211
+	depends on BCMA
+	select BRCMUTIL
+	select FW_LOADER
+	select CRC_CCITT
+	select CRC8
+	select CORDIC
+	---help---
+	  This module adds support for PCIe wireless adapters based on Broadcom
+	  IEEE802.11n SoftMAC chipsets.  If you choose to build a module, it'll
+	  be called brcmsmac.ko.
+
+config BRCM_TRACING
+	bool "Broadcom device tracing"
+	depends on BRCMSMAC || BRCMFMAC
+	---help---
+	  If you say Y here, the Broadcom wireless drivers will register
+	  with ftrace to dump event information into the trace ringbuffer.
+	  Tracing can be enabled at runtime to aid in debugging wireless
+	  issues. This option adds a small amount of overhead when tracing
+	  is disabled. If unsure, say Y to allow developers to better help
+	  you when wireless problems occur.
+
+config BRCMDBG
+	bool "Broadcom driver debug functions"
+	depends on BRCMSMAC || BRCMFMAC
+	---help---
+	  Selecting this enables additional code for debug purposes.

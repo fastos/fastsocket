@@ -1,0 +1,5 @@
+mainmenu "CARL9170 Firmware Configuration"
+
+source "carlfw/Kconfig"
+source "minifw/Kconfig"
+source "tools/Kconfig"

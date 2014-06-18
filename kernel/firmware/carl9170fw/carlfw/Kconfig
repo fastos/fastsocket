@@ -1,0 +1,233 @@
+menu "General"
+
+config CARL9170FW_RELEASE_VERSION
+	int
+	default 1
+
+menu "Selectable Hardware Options"
+
+choice
+	prompt "Receiver Max. Frame Length"
+	default CARL9170FW_RX_FRAME_LEN_8192
+
+	config CARL9170FW_RX_FRAME_LEN_4096
+		bool "4096"
+
+	config CARL9170FW_RX_FRAME_LEN_8192
+		bool "8192"
+
+	config CARL9170FW_RX_FRAME_LEN_16384
+		bool "16384"
+
+	config CARL9170FW_RX_FRAME_LEN_32768
+		bool "32768"
+
+endchoice
+
+config CARL9170FW_RX_FRAME_LEN
+	int
+	default 4096 if CARL9170FW_RX_FRAME_LEN_4096
+	default 8192 if CARL9170FW_RX_FRAME_LEN_8192
+	default 16384 if CARL9170FW_RX_FRAME_LEN_16384
+	default 32768 if CARL9170FW_RX_FRAME_LEN_32768
+
+config CARL9170FW_GPIO_INTERRUPT
+	def_bool y
+	prompt "GPIO Software Interrupt"
+	---help---
+	 When this option is enabled, the firmware will poll the GPIO
+	 registers and reports to the driver whenever the GPIO state
+	 has changed from a previous state.
+
+	 Note: This feature is necessary to monitor the WPS button,
+	       if you have one on your device, then say Y.
+
+config CARL9170FW_SECURITY_ENGINE
+	def_bool y
+	prompt "Support Hardware Crypto Engine"
+	---help---
+	 This options controls if the firmware will allow the driver
+	 to program the security engine / CAM through a firmware
+	 interface.
+
+	 Say Y. Unless you want to do the en- and decryption for
+	 CCMP(AES), TKIP/WEP(RC4) in the application anyway.
+
+config CARL9170FW_RADIO_FUNCTIONS
+	def_bool y
+	prompt "Enable Firmware-supported Radio/RF functions"
+	---help---
+	 Some PHY/RF functions (e.g.: AGC and Noise calibration) need
+	 to be done in the firmware.
+
+	 Say Y, unless you really don't need the Radio/RF for
+	 your project.
+
+endmenu
+
+menu "802.11 Firmware Features"
+
+config CARL9170FW_CAB_QUEUE
+	def_bool y
+	prompt "Support software-based Content after Beacon Queue"
+	---help---
+	 This (software) queue is used to send any broad-/multi-cast buffered
+	 frames after the next DTIM beacon.
+
+	 This feature is required for Accesspoint mode operation.
+
+	 Say Y.
+
+endmenu
+
+source "carlfw/usb/Kconfig"
+
+menu "Experimental, Unstable & Testing Extensions"
+
+config CARL9170FW_PRINTF
+	def_bool y
+	prompt "Advanced printf"
+	depends on CARL9170FW_DEBUG_UART || CARL9170FW_DEBUG_USB
+	---help---
+	 Advanced printf (very useful for debugging purposes)
+	 The formats supported by this implementation are:
+		'd' 'u' 'c' 's' 'x' 'X' 'p'.
+
+	 Note: If this option is disabled, the firmware will be only
+	       capable of reported _preformated_ string.
+
+config CARL9170FW_EXPERIMENTAL
+	def_bool y
+	prompt "Experimental Features"
+
+config CARL9170FW_WOL_OPTION
+	def_bool n
+	prompt "Wakeup on WLAN"
+	depends on CARL9170FW_EXPERIMENTAL
+	---help---
+	 With this option enabled, the firmware can wake-up
+	 suspended hosts... As long as they fully support
+	 USB remote wakeup.
+
+config CARL9170FW_WOL
+	def_bool n
+	depends on CARL9170FW_WOL_OPTION
+
+config CARL9170FW_WOL_NL80211_TRIGGERS
+	def_bool n
+	prompt "Standard NL80211 wakeup triggers"
+	depends on CARL9170FW_WOL_OPTION
+	select CARL9170FW_WOL
+	---help---
+	 Available triggers:
+	  * Magic Packet(tm) pattern
+	  * disconnect event
+
+config CARL9170FW_WOL_PROBE_REQUEST
+	def_bool n
+	prompt "Probe Request"
+	depends on CARL9170FW_WOL_OPTION
+	select CARL9170FW_WOL
+	---help---
+	 Scan probe requests for a given SSID.
+
+config CARL9170FW_WOL_PROBE_REQUEST_SSID
+	string
+	prompt "Wakeup on WLAN SSID"
+	default "CARL9170_WAKEUP"
+	depends on CARL9170FW_WOL_PROBE_REQUEST
+
+config CARL9170FW_VIFS_NUM
+	default 1
+	int
+	prompt "Number of additional pseudo virtual interfaces"
+	depends on CARL9170FW_EXPERIMENTAL
+
+config CARL9170FW_FW_MAC_RESET
+	def_bool y
+	prompt "Firmware MAC Chip recovery"
+	depends on CARL9170FW_EXPERIMENTAL
+
+config CARL9170FW_NOISY_MAC_RESET
+	def_bool n
+	prompt "Notify MAC RESET events"
+	depends on CARL9170FW_FW_MAC_RESET
+
+config CARL9170FW_BROKEN_FEATURES
+	def_bool n
+	prompt "Broken Featurs"
+
+config CARL9170FW_DEBUG
+	def_bool n
+	depends on CARL9170FW_BROKEN_FEATURES && CARL9170FW_PRINTF
+	prompt "Enable verbose debugging messages"
+
+config CARL9170FW_DEBUG_LED_HEARTBEAT
+	def_bool n
+	prompt "LED Heartbeat"
+	depends on CARL9170FW_BROKEN_FEATURES
+	---help---
+	 This option conflicts with the application's LED code.
+	 Also, it assumes that you have two LEDs, which is not
+	 necessarily true.
+
+config CARL9170FW_DEBUG_UART
+	def_bool n
+	prompt "Pass debug messages through Highspeed UART"
+	depends on CARL9170FW_BROKEN_FEATURES
+	---help---
+	 This option allows the firmware to send BUG/ERR/INFO/DBG and
+	 hexdumps through the UART _as well_. However, first: you must
+	 connect a working logger.
+
+config CARL9170FW_WATCHDOG_BUTTON
+	def_bool n
+	depends on CARL9170FW_BROKEN && CARL9170FW_GPIO_INTERRUPT
+	prompt "Trigger Watchdog by pressing the WPS button"
+
+choice CARL9170FW_UART_CLOCK
+	prompt "UART Clock"
+	depends on CARL9170FW_DEBUG_UART
+	default CARL9170FW_UART_CLOCK_40M
+
+config CARL9170FW_UART_CLOCK_25M
+	bool "25"
+
+config CARL9170FW_UART_CLOCK_40M
+	bool "40"
+
+endchoice
+
+config CARL9170FW_UNUSABLE
+	def_bool y
+	depends on CARL9170FW_BROKEN || CARL9170FW_DEBUG
+
+config CARL9170FW_USB_MODESWITCH
+	def_bool n
+	prompt "USB 1.1 / 2.0 switching support"
+	depends on CARL9170FW_BROKEN_FEATURES
+	---help---
+	 Mostly implemented, but untested and some serious
+	 doubts remain.
+
+config CARL9170FW_DMA_QUEUE_BUMP
+	def_bool n
+	prompt "Bump a stuck TX queue before doing a MAC reset"
+	depends on CARL9170FW_BROKEN_FEATURES
+
+menu "Build Options"
+config CARL9170FW_AGGRESSIVE_CFLAGS
+	def_bool y
+	prompt "Enable aggressive size optimization"
+	---help---
+	 This option adds several more optimization compiler flags,
+	 which can greatly reduce the firmware size... at the expense
+	 of machine-code readability.
+
+	  Say Y. Else the firmware might not fit onto the device!
+
+endmenu
+
+endmenu
+
+endmenu

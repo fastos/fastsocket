@@ -1,0 +1,27 @@
+#
+# initramfs definition for zfcpdump
+# See also Documentation/s390/zfcpdump.txt
+#
+
+dir /dev 755 0 0
+nod /dev/console 644 0 0 c 5 1
+nod /dev/null 644 0 0 c 1 3
+nod /dev/sda1 644 0 0 b 8 1
+nod /dev/sda2 644 0 0 b 8 2
+nod /dev/sda3 644 0 0 b 8 3
+nod /dev/sda4 644 0 0 b 8 4
+nod /dev/sda5 644 0 0 b 8 5
+nod /dev/sda6 644 0 0 b 8 6
+nod /dev/sda7 644 0 0 b 8 7
+nod /dev/sda8 644 0 0 b 8 8
+nod /dev/sda9 644 0 0 b 8 9
+nod /dev/sda10 644 0 0 b 8 10
+nod /dev/sda11 644 0 0 b 8 11
+nod /dev/sda12 644 0 0 b 8 12
+nod /dev/sda13 644 0 0 b 8 13
+nod /dev/sda14 644 0 0 b 8 14
+nod /dev/sda15 644 0 0 b 8 15
+file /init arch/s390/boot/zfcpdump 755 0 0
+dir /proc 755 0 0
+dir /sys 755 0 0
+dir /mnt 755 0 0
