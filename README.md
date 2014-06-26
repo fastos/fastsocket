@@ -63,9 +63,9 @@ Ab is required on machines act as clients:
 
 ### GET THE SOURCE ###
 
-The source code is available at http://xxx.xxx.xxx. Clone the repository by:
+The source code is available at https://github.com/fastos/fastsocket.git. Clone the repository by:
 
-	[root@localhost ~]# git clone http://xxx.xxx.xxx fastsocket
+	[root@localhost ~]# git clone https://github.com/fastos/fastsocket.git
 
 Here's a brief introduction to the directories in the repository.
 
