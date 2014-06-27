@@ -10,10 +10,6 @@
 #define MAX_LISTEN_ADDRESS	32
 #define MAX_PROXY_ADDRESS	32
 
-//#define print_d(fmt, args...)	printf("Worker[%lu] %s:%d\t" fmt, syscall(__NR_gettid),__FUNCTION__ , __LINE__, ## args)
-
-#define print_d(fmt, args...)
-
 struct worker_data {
 	pid_t process;
 	uint64_t trancnt;
@@ -69,7 +65,8 @@ struct proxy_addr
 	char param_ip[32];
 };
 
-int init_server(void);
+void init_log(void);
+void init_server(void);
 void init_signal(void);
 void init_timer(void);
 void init_workers(void);

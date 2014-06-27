@@ -37,13 +37,22 @@ int start_cpu = 0;
 int enable_verbose = 0;
 int enable_proxy = 0;
 int enable_keepalive = 0;
-
+int enable_debug = 0;
 int process_mode = 0;
+int specified_log_file = 0;
+FILE *log_file = NULL;
+int pfd;
+
+#define print_d(fmt, args...) ({\
+		if (enable_debug && log_file) \
+			printf("Worker[%lu] %s:%d\t" fmt, syscall(__NR_gettid),__FUNCTION__ , __LINE__, ## args); \
+	})
 
 struct listen_addr la[MAX_LISTEN_ADDRESS];
 struct proxy_addr pa[MAX_PROXY_ADDRESS];
 int la_num;
 int pa_num;
+char log_path[64] = {0};
 
 static void process_read(struct conn_context *ctx);
 static void process_write(struct conn_context *ctx);
@@ -91,9 +100,17 @@ int main(int argc, char *argv[])
 	printf("   -x: enable proxy mode and specify backend listen address\n	   [default is off]\n");
 	printf("   -k: enable HTTP keepalive\n	   [default is off]\n");
 	printf("   -v: enable verbose mode\n	   [default is off]\n");
+	printf("   -d: enable debug mode\n	   [default is off]\n");
+	printf("   -o: specify log file\n	   [default is ./demo.log]\n");
 	printf("\n");
 
 again:
+	if (argc >= 2 && strcmp(argv[1], "-d") == 0) {
+		enable_debug = 1;
+		argv++;
+		argc--;
+		goto again;
+	}
 
 	if (argc >= 2 && strcmp(argv[1], "-v") == 0) {
 		enable_verbose = 1;
@@ -106,6 +123,14 @@ again:
 		enable_keepalive = 1;
 		argv++;
 		argc--;
+		goto again;
+	}
+
+	if (argc >= 3 && strcmp(argv[1], "-o") == 0) {
+		strncpy(log_path, argv[2], sizeof(log_path));
+		specified_log_file = 1;
+		argv += 2;
+		argc -= 2;
 		goto again;
 	}
 
@@ -185,8 +210,10 @@ again:
 	if (la_num) {
 		int i;
 
+		printf("Specified listen address:\n");
+
 		for (i = 0; i < la_num; i++) {
-			printf("Specified listen address %s:%d\n",
+			printf("\t%s:%d\n",
 			       la[i].param_ip, la[i].param_port);
 		}
 	} else {
@@ -194,7 +221,7 @@ again:
 		strncpy(la[0].param_ip, "0.0.0.0", 32);
 		inet_aton(la[0].param_ip, &la[0].listenip);
 		la[0].param_port = 80;
-		printf("Default listen address %s:%d\n",
+		printf("Default listen address:\n\t%s:%d\n",
 		       la[0].param_ip, la[0].param_port);
 	}
 	printf("\n");
@@ -202,16 +229,22 @@ again:
 	if (pa_num) {
 		int i;
 
-		printf("Proxy mode is enabled\n\n");
+		printf("Proxy mode is enabled, back-end address:\n");
+
+		if (enable_keepalive)
+			printf("HTTP keepalive is not supported in the proxy mode so far and therefore is disabled\n\n");
+
 		enable_keepalive = 0;
-		printf("HTTP keepalive is not supported in the proxy mode so far and therefore is disabled\n\n");
 
 		for (i = 0; i < pa_num; i++) {
-			printf("Back-End address %s:%d\n",
+			printf("\t%s:%d\n",
 			       pa[i].param_ip, pa[i].param_port);
 		}
 		printf("\n");
 	}
+
+	if (enable_debug)
+		printf("Debug Mode is enabled\n\n");
 
 	if (enable_keepalive)
 		printf("HTTP keepalive is enabled\n\n");
@@ -219,6 +252,7 @@ again:
 	if (process_mode)
 		printf("Process Mode is enable with %d workers\n\n", num_workers);
 
+	init_log();
 	init_server();
 	init_signal();
 
@@ -308,9 +342,35 @@ int init_single_server(struct in_addr ip, uint16_t port)
 	return serverfd;
 }
 
-int init_server(void)
+void init_log(void)
 {
-	int ret = 0;
+	if (specified_log_file) {
+		log_file = fopen(log_path, "a");
+		if (!log_file)
+			perror("Open log file failed");
+		printf("Using specified log file %s\n\n", log_path);
+	}
+
+	if (!log_file) {
+		log_file = fopen("demo.log", "a");
+		if (!log_file) {
+			perror("Open log file failed");
+			exit_cleanup();
+		} else {
+			printf("Using default log file %s\n\n", "./demo.log");
+		}
+	}
+
+	pfd = dup(STDERR_FILENO);
+
+	dup2(fileno(log_file), STDOUT_FILENO);
+	dup2(fileno(log_file), STDERR_FILENO);
+
+	print_d("Log starts\n");
+}
+
+void init_server(void)
+{
 	int i;
 
 	for (i = 0; i < la_num; i++){
@@ -322,8 +382,6 @@ int init_server(void)
 
 		la[i].listen_fd = init_single_server(ip, port);
 	}
-
-	return ret;
 }
 
 void init_processes(void)
@@ -350,7 +408,7 @@ void init_processes(void)
 			perror("Unable to fork child process");
 			exit_cleanup();
 		} else if( pid == 0) {
-			wdata[i].process = pid;
+			wdata[i].process = getpid();
 			process_clients((void *)&(wdata[i]));
 			exit(0);
 		}
@@ -689,6 +747,8 @@ static void process_read_frontend(struct conn_context *ctx)
 		goto free_back;
 	}
 
+	print_d("Create socket %d\n", ret);
+
 	flags = fcntl(ret, F_GETFL, 0);
 	flags |= O_NONBLOCK;
 	fcntl(ret, F_SETFL, flags);
@@ -885,7 +945,7 @@ static void process_accept(struct conn_context * listen_ctx)
 		flags |= O_NONBLOCK;
 		fcntl(client_fd, F_SETFL, flags);
 
-		print_d("Accept LWD %d from %d\n", client_fd, listen_fd);
+		print_d("Accept socket %d from %d\n", client_fd, listen_fd);
 	}
 
 	pool = listen_ctx->pool;
@@ -1026,6 +1086,8 @@ void do_stats(void) {
 	int signum;
 	int i;
 
+	FILE *p = fdopen(pfd, "w");
+
 	if(sigemptyset(&siglist) == -1) {
 		perror("Unable to initalize stats signal list");
 		exit_cleanup();
@@ -1055,7 +1117,7 @@ void do_stats(void) {
 			{
 				trancnt += wdata[i].trancnt - wdata[i].trancnt_prev;
 				if (enable_verbose)
-					fprintf(stderr, "%lu[%lu-%lu-%lu-%lu-%lu-%lu-%lu-%lu]  ",
+					fprintf(p, "%lu[%lu-%lu-%lu-%lu-%lu-%lu-%lu-%lu]  ",
 						wdata[i].trancnt - wdata[i].trancnt_prev, wdata[i].polls_mpt,
 						wdata[i].polls_lst, wdata[i].polls_min, wdata[i].polls_max,
 						wdata[i].polls_avg, wdata[i].accept_cnt, wdata[i].read_cnt,
@@ -1063,10 +1125,9 @@ void do_stats(void) {
 				wdata[i].trancnt_prev = wdata[i].trancnt;
 			}
 
-			fprintf(stderr, "\tTotal %8lu\n", trancnt);
+			fprintf(p, "\tRequest/s %8lu\n", trancnt);
 
 		} else if(signum == SIGINT) {
-			printf("\nExiting...\n");
 			stop_workers();
 			break;
 		}
@@ -1082,8 +1143,10 @@ void stop_processes(void)
 {
 	int i;
 
-	for(i = 0; i < num_workers; i++)
-		kill(wdata[i].process, SIGTERM);
+	for(i = 0; i < num_workers; i++) {
+		if (wdata[i].process)
+			kill(wdata[i].process, SIGTERM);
+	}
 }
 
 void stop_workers(void)
