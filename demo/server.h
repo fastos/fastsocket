@@ -35,12 +35,12 @@ struct context_pool {
 	int next_idx;
 	struct conn_context {
 		int fd;
+		int fd_added;
 		int end_fd;
+		int end_fd_added;
 		int flags;
 		int ep_fd;
 		int cpu_id;
-		//int recv_left;
-		//int send_left;
 		void (*handler)(struct conn_context *);
 		int events;
 		int data_len;

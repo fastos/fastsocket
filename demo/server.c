@@ -483,7 +483,9 @@ struct conn_context *alloc_context(struct context_pool *pool)
 	pool->next_idx = pool->arr[pool->next_idx].next_idx;
 
 	ret->fd = 0;
+	ret->fd_added = 0;
 	ret->end_fd = 0;
+	ret->end_fd_added = 0;
 	ret->next_idx = -1;
 
 	ret->pool = pool;
@@ -519,27 +521,32 @@ char *http_200_keepalive="HTTP/1.0 200 OK\r\n"
 char *http_response;
 int http_response_len;
 
-static void process_close(struct conn_context *client_ctx)
+static void process_close(struct conn_context *ctx)
 {
 	int fd, end_fd, ep_fd, ret;
 	struct epoll_event evt;
 
-	ep_fd = client_ctx->ep_fd;
-	fd = client_ctx->fd;
-	end_fd = client_ctx->end_fd;
+	ep_fd = ctx->ep_fd;
+	fd = ctx->fd;
+	end_fd = ctx->end_fd;
 
 	evt.events = EPOLLHUP | EPOLLERR;
-	evt.data.ptr = client_ctx;
+	evt.data.ptr = ctx;
 
-	ret = epoll_ctl(ep_fd, EPOLL_CTL_DEL, fd, &evt);
-	if (ret < 0)
-		perror("Unable to delete client socket from epoll");
 
-	close(fd);
-	if (end_fd) {
-		ret = epoll_ctl(ep_fd, EPOLL_CTL_DEL, end_fd, &evt);
+	if (ctx->fd_added) {
+		ret = epoll_ctl(ep_fd, EPOLL_CTL_DEL, fd, &evt);
 		if (ret < 0)
 			perror("Unable to delete client socket from epoll");
+	}
+	close(fd);
+
+	if (end_fd) {
+		if (ctx->end_fd_added) {
+			ret = epoll_ctl(ep_fd, EPOLL_CTL_DEL, end_fd, &evt);
+			if (ret < 0)
+				perror("Unable to delete client socket from epoll");
+		}
 		close(end_fd);
 	}
 }
@@ -780,6 +787,7 @@ static void process_read_frontend(struct conn_context *ctx)
 	fcntl(ret, F_SETFL, flags);
 
 	end_fd = ret;
+	ctx->end_fd = end_fd;
 
 	select_backend(&addr_in);
 
@@ -791,7 +799,6 @@ static void process_read_frontend(struct conn_context *ctx)
 		}
 	}
 
-	ctx->end_fd = end_fd;
 	ctx->handler = process_write_backend;
 	ctx->flags |= PROXY_BACKEND_EVENT;
 
@@ -803,6 +810,8 @@ static void process_read_frontend(struct conn_context *ctx)
 		perror("Unable to add client socket read event to epoll");
 		goto free_back;
 	}
+
+	ctx->end_fd_added = 1;
 
 	print_d("Add back-end socket %d to epoll\n", end_fd);
 
@@ -996,6 +1005,8 @@ static void process_accept(struct conn_context * listen_ctx)
 		perror("Unable to add client socket read event to epoll");
 		goto free_back;
 	}
+
+	client_ctx->fd_added = 1;
 
 	goto back;
 
