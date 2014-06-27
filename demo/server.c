@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 
 #include "server.h"
 
@@ -371,7 +372,8 @@ void init_log(void)
 
 void init_server(void)
 {
-	int i;
+	int ret, i;
+	struct rlimit limits;
 
 	for (i = 0; i < la_num; i++){
 		struct in_addr ip;
@@ -382,6 +384,30 @@ void init_server(void)
 
 		la[i].listen_fd = init_single_server(ip, port);
 	}
+
+	limits.rlim_cur = RLIM_INFINITY;
+	limits.rlim_max = RLIM_INFINITY;
+
+	ret = setrlimit(RLIMIT_CORE, &limits);
+	if (ret < 0) {
+		perror("Set core limit failed");
+		exit_cleanup();
+	}
+
+	getrlimit(RLIMIT_CORE, &limits);
+	print_d("Core limit %ld %ld\n", limits.rlim_cur, limits.rlim_max);
+
+	limits.rlim_cur = MAX_CONNS_PER_WORKER;
+	limits.rlim_max = MAX_CONNS_PER_WORKER;
+
+	ret = setrlimit(RLIMIT_NOFILE, &limits);
+	if (ret < 0) {
+		perror("Set open file limit failed");
+		exit_cleanup();
+	}
+
+	getrlimit(RLIMIT_NOFILE, &limits);
+	print_d("Open file limit %ld %ld\n", limits.rlim_cur, limits.rlim_max);
 }
 
 void init_processes(void)
