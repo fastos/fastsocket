@@ -780,14 +780,22 @@ static void process_read_frontend(struct conn_context *ctx)
 		goto free_back;
 	}
 
+	end_fd = ret;
+	ctx->end_fd = end_fd;
+
 	print_d("Create socket %d\n", ret);
 
 	flags = fcntl(ret, F_GETFL, 0);
 	flags |= O_NONBLOCK;
 	fcntl(ret, F_SETFL, flags);
 
-	end_fd = ret;
-	ctx->end_fd = end_fd;
+	struct linger ling = {1, 0};
+
+	ret = setsockopt(end_fd, SOL_SOCKET, SO_LINGER, (void *)&ling, sizeof(ling));
+	if (ret < 0) {
+		perror("Unable to set socket linger option");
+		goto free_back;
+	}
 
 	select_backend(&addr_in);
 
