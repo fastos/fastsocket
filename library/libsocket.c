@@ -146,8 +146,6 @@ int listen(int fd, int backlog)
 	if (!real_listen)
 		real_listen = dlsym(RTLD_NEXT, "listen");
 
-	printf("Listen %d\n", fd);
-
 	if (fsocket_channel_fd >= 0) {
 		arg.fd = fd;
 		arg.backlog = backlog;
@@ -234,8 +232,6 @@ int close(int fd)
 		arg.fd = fd;
 
 		if (fsocket_fd_set[fd])
-			printf("Close listen %d\n", fd);
-		if (fsocket_fd_set[fd])
 			fsocket_fd_set[fd] = 0;
 
 		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_CLOSE, &arg);
@@ -291,7 +287,6 @@ int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 			if (ret < 0) {
 				FSOCKET_ERR("FSOCKET: spawn failed!\n");
 			}
-			printf("Spawn %d\n", fd);
 		}
 
 		arg.op.epoll_op.epoll_fd = efd;
