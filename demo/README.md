@@ -13,15 +13,14 @@ connections individually.
 The demo server has two working modes: server mode and proxy mode. 
 * **Server Mode**: The server will respond with a HTTP 200 OK once 
 it receives anything.
-* **Proxy Mode**: When the server receive something, it forwards 
+* **Proxy Mode**: When the server receives something, it forwards 
 that to a backend server. And the server delivers the reponse from 
 the backend server back to the client.
 
-As you can see, It is a simple and stupid TCP server which knows little
-about HTTP protocol. Please make sure message will not take more 
-than one packet to transmit, including the request from client and 
-the response from the backend server. Otherwise, the demo server 
-will get confused.
+As you can see, It is a simple and stupid TCP server. Please make 
+sure that each message, including the request from client and 
+the response from the backend server, only takes one packet. 
+Otherwise, the demo server will get confused.
 
 ## BUILD ##
 
@@ -37,7 +36,7 @@ with default settings.
 `[root@localhost demo]# ./server`
 
 All the parameters are listed below:
-- -w worker_num: Specify worker process number to process connection.
+- -w worker_num: Specify worker process number to process connections.
 	- Default is the available CPU core number.
 - -c start_core: Specify the first CPU core to start to bind each 
 worker process.
@@ -63,18 +62,16 @@ mode.
 There are two important notes before running the demo server:
 
 - To fully load CPUs on the demo server machine, make sure the client 
-server and the backend server are not the bottleneck. Two possible 
-solutions:
-	- Provide enough machines for both the client and the backend server.
-	- Or use Fastsocekt on the client and backend server(recommended).
-- Configure NIC properly. If you have no idea what to do, then use the 
-script provided in this repo.
+and the backend server are not the bottleneck. Two possible solutions:
+	- Provide enough machines acting as the clients and the backend servers.
+	- Or use Fastsocekt on the client and backend server(recommended to save machines).
+- Configure NIC properly. If you have no idea what to do, then use the [script](../scripts/README.md "Script") provided in this repo.
 
 ### SERVER MODE EXAMPLE ###
 
-In the server mode, two hosts are needed:
+In the server mode, two hosts are needed if a single client can generate enough load:
 
-- Host A acts as a HTTP work load producer
+- Host A acts as a client to generate HTTP request work load 
 - Host B acts as a simple web server
 
 Assume each machine has 12 CPU cores and your network is configured in the following way:
@@ -90,20 +87,9 @@ Assume each machine has 12 CPU cores and your network is configured in the follo
 
 To run the demo, here are the steps on each of two hosts.
 
-**Host A**:
-
-- Run the workload(using ab as an example).
-
-	`[root@localhost ~]# ab -n 1000000 -c 100 http://10.0.0.2:80/`
-
-- To saturate the server, multiple ab instances may be required, which 
-can be launched by the following command (12 instances in the example).
-
-	`[root@localhost ~]# N=12; for i in $(seq 1 N); do ab -n 1000000 -c 100 http://10.0.0.2:80/ > /dev/null 2>&1; done`
-
 **Host B**:
 
-- Run the demo server.
+- Run the demo server in the default server mode with 12 workers(equal to CPU core number).
 
 	`[root@localhost demo]# ./server -w 12 -a 10.0.0.2:80`
 
@@ -111,11 +97,23 @@ can be launched by the following command (12 instances in the example).
 
 	`[root@localhost demo]# LD_PRELOAD=../library/libfsocket.so ./server -w 12 -a 10.0.0.2:80`
 
-### PROXY MODE ###
+**Host A**:
 
-In the proxy mode, three hosts are needed:
+- Run the work load generator(using ab as an example) to stress the demo server.
 
-- Host A acts as a HTTP work load producer
+	`[root@localhost ~]# ab -n 1000000 -c 100 http://10.0.0.2:80/`
+
+- To saturate the server, multiple ab instances may be required, which 
+can be launched by the following command (12 instances in the example).
+
+	`[root@localhost ~]# N=12; for i in $(seq 1 $N); do ab -n 1000000 -c 100 http://10.0.0.2:80/ > /dev/null 2>&1; done`
+
+
+### PROXY MODE EXAMPLE ###
+
+In the proxy mode, three hosts are needed, if one host for each client and backend server is enough:
+
+- Host A acts as a client to generate HTTP request work load 
 - Host B acts as a proxy server
 - Host C acts as a backend server
 
@@ -136,15 +134,9 @@ Assume each machine has 12 CPU cores and your network is configured in the follo
 
 To run the demo, here are the steps on each of three hosts.
 
-**Host A**:
-
-- Run the work load(again with 12 ab instances).
-
-	`[root@localhost ~]# N=12; for i in $(seq 1 N); do ab -n 1000000 -c 100 http://10.0.0.2:80/ > /dev/null 2>&1; done`
-
 **Host B**:
 
-- Run the demo server in proxy mode.
+- Run the demo server in proxy mode with 12 workers.
 
 	`[root@localhost demo]# ./server -w 12 -a 10.0.0.2:80 -x 10.0.0.3:80`
 
@@ -154,11 +146,14 @@ To run the demo, here are the steps on each of three hosts.
 
 **Host C**:
 
-- Run the demo server in server mode.
+- Any web server is fine to act as a backend server. Here we just use the demo server 
+again. 
 
 	`[root@localhost demo]# ./server -w 12 -a 10.0.0.3:80`
 
-- Or run the demo server in server mode with Fastsocket(recommended).
+**Host A**:
 
-	`[root@localhost demo]# LD_PRELOAD=../library/libsocket.so ./server -w 12 -a 10.0.0.3:80`
+- Run the work load generator(again with 12 ab instances).
+
+	`[root@localhost ~]# N=12; for i in $(seq 1 $N); do ab -n 1000000 -c 100 http://10.0.0.2:80/ > /dev/null 2>&1; done`
 

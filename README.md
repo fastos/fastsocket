@@ -3,90 +3,99 @@
 
 ## TABLE OF CONTENT ##
 * [Introduction](#introduction)
+* [Participants](#participants)
 * [Installation](#installation)
-  * [Requisites](requisites)
-  * [Get the source](get-the-source)
-  * [Kernel](#kernel)
-    * [Install from RPM packages](#install-from-rpm-packages)
-	* [Install from source](#install-from-source)
-  * [User-level library](#user-level-library)
+  * [Install From Source](#install-from-source)
+  * [Install From Yum](#install-from-yum)
+  * [Switch Kernel](#switch-kernel)
 * [System Configuration](#system-configuration)
 * [Usage](#usage)
-* [Running demo](#running-demo)
-  * [Build Demo](#build-demo)
-  * [Simple Web Mode](#simple-web-mode)
-  * [Proxy Mode](#proxy-mode)
+  * [Suitable Scenarios](#suitable-scenarios)
+  * [How To Use] (#how-to-use)
+  * [Demo Server](#demo-server)
 * [Evaluation](#evaluation)
+  * [Nginx] (#nginx)
+  * [Haproxy] (#haproxy)
+  * [Online Evaluation](#online-evaluation)
 
 ## INTRODUCTION ##
 
-Fastsocket is a scalable TCP socket implementation that
+With a rapid growth of NIC bandwidth and CPU cores on one single machine, a 
+scalable TCP network stack is performance-critical. However, stock Linux 
+kernel dose not scale well when CPU core number is above 4. It is even worse 
+that the throughput could collapse when there are more than 12 CPU cores.
+
+Fastsocket is a scalable TCP socket implementation and achieves a straight 
+linear performance growth when scaling up to 24 CPU cores. To realize the
+scalability, Fastsocket 
+
+  * removes socket performance bottlenecks in the VFS,
   * achieves locality of both passive and active connections,
   * converts both listen and established socket tables into per-cpu data
     structures,
-  * benefits applications without introducing modifications to the apps, and
-  * keeps all kinds of monitoring / tuning tools available out-of-the-box.
+  * benefits applications without introducing modifications to the applications, and
+  * keeps all kinds of monitoring/tuning tools available out-of-the-box.
 
-According to our evaluations, Fastsocket increases throughput of nginx and
-HAProxy (measured by connections per second) by 65% and 46% on a 24-core
-machine, compared to Linux 3.13. Fastsocket has also been deployed to Sina
-production systems for balancing system loads and reducing CPU utilization.
+Fastsocket is implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6) 
+of CentOS-6.5.
+
+According to our evaluations, Fastsocket increases throughput of Nginx and
+Haproxy(measured by connections per second) by **290%** and **620%** on a 
+24-core machine, compared to the base CentOS-6.5 kernel.
+
+Moreover, Fastsocket can further exploit more from the hardware:
+
+- With Fastsocket, Hyper-Threading can make an extra **20%** performance increase.
+- With Fastsocket, NIC that support Flow-Director(like Intel 82599) can increase 
+the throughput by **15%** if the server works as a proxy(like Haproxy).
+
+Fastsocket has already been deployed in the SINA production environment and is 
+used with Haproxy to provide HTTP load balance service. More details are in
+the [Evaluation](#online-evaluation).
+
+## PARTICIPANTS ##
+
+- Fastsocket is started and mainly developed by Xiaofeng Lin from the OS team of SINA.COM.
+- OS center of Tsinghua is cooperating closely with SINA.COM to further enhance Fastsocket.
+- Fastsocket is also supported by Intel with extensive assistance.
+- Zeuux Commutiy is providing open source consulting for Fastsocket.
 
 ## INSTALLATION ##
 
-### REQUISITES ###
-
-10 Gbe controllers are recommended in order to enjoy the benefits of Fastsocket,
-though Fastsocket can also work on 1Gbe controllers.  Here is a list of
-tested NICs (Network Interface Controller):
-
-- igb
-  - Intel Corporation 82576 Gigabit Network Connection (rev 01)
-  - Intel Corporation I350 Gigabit Network Connection (rev 01)
-- ixgbe
-  - Intel Corporation 82599ES 10-Gigabit SFI/SFP+ Network Connection (rev 01)
-  - Intel Corporation 82599EB 10-Gigabit SFI/SFP+ Network Connection (rev 01)
-- bnx2
-  - Broadcom Corporation NetXtreme II BCM5708 Gigabit Ethernet (rev 12)
-  - Broadcom Corporation NetXtreme II BCM5709 Gigabit Ethernet (rev 20)
-- tg3
-  - Broadcom Corporation NetXtreme BCM5720 Gigabit Ethernet PCIe
-  - Broadcom Corporation NetXtreme BCM5761 Gigabit Ethernet PCIe (rev 10)
-
-All packages required can be installed by the following command:
-
-	[root@localhost ~]# yum install gcc make ncurses ncurses-devel perl ethtool iproute net-tools iptables
-
-Ab is required on machines act as clients:
-
-	[root@localhost ~]# yum install httpd-tools
-
-### GET THE SOURCE ###
+### INSTALL FROM SOURCE ###
 
 The source code is available at https://github.com/fastos/fastsocket.git. Clone the repository by:
 
 	[root@localhost ~]# git clone https://github.com/fastos/fastsocket.git
 
-Here's a brief introduction to the directories in the repository.
+Here is a brief introduction to the directories in the repository.
 
-* **kernel** - the kernel source code customized for fastsocket, based on CentOS
-  2.6.32-431.17.1
-* **library** - the library to enable fastsocket in user space
-* **scripts** - configuration scripts
-* **demo** - source code of a demo server
+* **kernel** - source code of the Fastsocket customized kernel
+* **module** - source code of the Fastsocket kernel module
+* **library** - source code of user-level library to support Fastsocket
+* **scripts** - scripts to set NIC and system environment(NOT compulsory for Fastsocket)
+* **demo** - source code of a demo server to demonstrate performance of Fastsocket
 
-### KERNEL ###
+The following commands will build and install the kernel after Fastsocket repository
+is downloaded from git.
 
-#### INSTALL FROM RPM PACKAGES ####
+	[root@localhost ~]# cd fastsocket/kernel
+	[root@localhost kernel]# make defconfig
+	[root@localhost kernel]# make
+	[root@localhost kernel]# make modules_install
+	[root@localhost kernel]# make install
 
-For those who do not want to bother with the source codes, RPM packages are
-provided for RHEL, CentOS and Fedora. Packages in deb format are not yet
-available.
+Enter the library directory and make the library:
 
-Download the files:
+	[root@localhost fastsocket]# cd library
+	[root@localhost library]# make
 
-	[root@localhost ~]# wget http://xxx.xxx.xxx/xxx.tgz
-	[root@localhost ~]# tar xf xxx.tgz
+After that, libfsocket.so is created in the same directory.
+
+### INSTALL FROM YUM ###
+
+For those who do not want to bother with the source codes, RPM packages for
+x86_64 are provided at http://114.215.138.161/download/ 
 
 Install the RPM packages:
 
@@ -95,64 +104,57 @@ Install the RPM packages:
 	> kernel-firmware-2.6.32-431.17.1.el6.x86_64.rpm \
 	> kernel-devel-2.6.32-431.17.1.el6.x86_64.rpm
 
-Reboot and enter the new kernel:
+The library RPM package for x86_64 is also available at http://114.215.138.161/download/
 
-	[root@localhost ~]# reboot
+Install the RPM package:
 
-#### INSTALL FROM SOURCE ####
+	[root@localhost ~]# rpm -ivh libfsocket-1.x.x.x86_64.rpm
 
-Developers can easily get the source codes and build fastsocket as prefered. The
-following commands will build and install the kernel after Fastsocket repository
-is downloaded from git.
+After that, libfsocket.so should be located in /usr/lib64.
 
-	[root@localhost ~]# cd fastsocket/kernel
-	[root@localhost kernel]# make localmodconfig
-	[root@localhost kernel]# make
-	[root@localhost kernel]# make modules_install
-	[root@localhost kernel]# make install
+### SWITCH KERNEL ###
 
-Then you can reboot and enter the new kernel:
-
-	[root@localhost kernel]# reboot
-
-
-### USER-LEVEL LIBRARY ###
-
-To compile the library, enter the library directory, and make:
-
-	[root@localhost fastsocket]# cd library
-	[root@localhost library]# make
-
-After that, a file named libsocket.so is created in the same directory.
-
+When the installation is done, remember to modify grub file to switch to the 
+Fastsocket kernel and reboot the system.
 
 ## SYSTEM CONFIGURATION ##
 
-After booting into the kernel with fastsocket, you can probe the fastsocket
-module into the kernel:
+After booting into the kernel with Fastsocket, load the Fastsocket module with 
+default parameters:
 
 	[root@localhost ~]# modprobe fastsocket
 
-To check if the module is loaded successfully, run
+For more detailed information of modules parameters, please refer to [Module](module/README.md "Fastsocket Module").
 
-	[root@localhost ~]# lsmod | grep fastsocket
+Two ways to check if the module is loaded successfully.
 
-and make sure you get a line like the following
+* Check lsmod:
 
-    fastsocket             23145  0
+		[root@localhost ~]# lsmod | grep fastsocket
+		fastsocket             23145  0
 
-Set up IP addresses as you like, and a script in the repository will take care
-of the remaining configurations:
+* Check dmesg:
+
+		[root@localhost ~]# dmesg | tail
+		Fastsocket: Load Module
+		Fastsocket: Enable Listen Spawn[Mode-2]
+		Fastsocket: Enable Recieve Flow Deliver
+		Fastsocket: Enable Fast Epoll
+
+Run **nic.sh** provided in the scripts directory of the repository to take care of 
+remaining configuration.
 
 	[root@localhost ~]# cd fastsocket
 	[root@localhost fastsocket]# scripts/nic.sh -i eth0
 
 *eth0* is the interface to be used and should be changed according to your
-system configuration (refer to *ifconfig* for details). The scripts will
-automatically check system and NIC parameters and configures various
-features. Please make sure you see the following line at the end of the output:
+system configuration. The script will automatically check system and NIC 
+parameters, then configures various features. Please make sure you see the 
+following line at the end of the output:
 
-    Fastsocket has successfully configured eth0
+	Fastsocket has successfully configured eth0
+
+If you are interested in how nic.sh works, please refer to [Scripts](scripts/README.md "Configuration Scripts").
 
 A higher limit of opened files per process is sometimes needed for stress testing:
 
@@ -160,156 +162,125 @@ A higher limit of opened files per process is sometimes needed for stress testin
 
 ## USAGE ##
 
-Fastsocket is enabled by preloading a shared library when launching an
-application. For example, ngnix can be started with Fastsocket by:
+### SUITABLE SCENARIOS###
+
+Generally, scenarios meeting the following conditions will benefit the most 
+from Fastsocket:
+
+* The machine has no less than 8 CPU cores.
+* Large portion of the CPU cycles is spent in network softirq and socket 
+related system calls.
+* Short TCP connections are heavily used.
+* Application uses non-blocking IO over epoll as the IO framework.
+* Application uses multiple processes to accept connections individually.
+
+Meanwhile, we are developing Fastsocket to improve the network stack performance 
+in more general scenarios.
+
+### HOW TO USE ###
+
+Fastsocket is enabled by preloading a shared library named libfsocket.so 
+when launching an application. For example, ngnix can be started with Fastsocket by:
 
 	[root@localhost fastsocket]# cd library
-	[root@localhost library]# LD_PRELOAD=./libsocket.so nginx
+	[root@localhost library]# LD_PRELOAD=./libfsocket.so nginx
 
 Without the preloaded library, applications can run as if they are on the
 original kernel.
 
 	[root@localhost ~]# nginx
 
-## RUNNING DEMO ##
+For more information about the library, please refer to [Library](library/README.md "Fastsocket Library").
 
-The demo server can act as a simple web server or a proxy server. The former
-needs two hosts and the latter three. For more details on the demo server
-please refer to [Demo Server](http://github.com).
+Here we list a few applications that are working fine with Fastsocket:
 
-> Note: It is recommended to install Fastsocket on all machines involved in the
-> tests, no matter they act as clients or servers, to avoid potential
-> bottlenecks in the original kernel.
+* haproxy
+* nginx (Do disable accept mutex)
+* lighttpd
 
-### BUILD DEMO ###
+We are also using Fastsocket on the load generators in our benchmark tests. 
+This is very helpful since Fastsocket greatly increases the maximum work load that 
+could be generated from a single machine, which saves machines and operations. 
+These load generators are:
 
-Demo can be built by the following command:
+* ab
+* http_load
 
->	`[root@localhost fastsocket]# cd demo && make`
+### DEMO SERVER ###
 
-### SIMPLE WEB MODE ###
+We provide a demo server In the demo directory of the repository. The demo 
+server dose nothing but read/write messages from/to network sockets and is 
+purely used to study and benchmark the performance of network stack of Linux 
+kernel. When the demo server is running, it has little user CPU consumption, 
+which makes it a perfect network application to observe the network stack 
+performance.
 
-In the simple web mode, two hosts are needed:
+Moreover, it is also used to demonstrate the scalability and performance 
+improvement of Fastsocket over the base Linux kernel.
 
-- Host A acts as a work load producer
-- Host B acts as a simple web server
-
-Assume your IP addresses are configured in the following way:
-
-
-	+--------------------+     +--------------------+
-	|       Host A       |     |       Host B       |
-	|                    |     |                    |
-	|        10.0.0.1/24 |-----| 10.0.0.2/24        |
-	|                    |     |                    |
-	+--------------------+     +--------------------+
-
-
-To run the demo, here are the steps on each of two hosts.
-
-**Host A**:
-
-> - Install and run the workload, e.g.
->
->	`[root@localhost ~]# ab -n 1000000 -c 100 http://10.0.0.2:80/`
->
-> - To saturate the server, multiple ab instances are required, which can be
->   launched by the following command (12 instances in the example).
->
->   `[root@localhost ~]# N=12; for i in $(seq 1 N); do ab -n 1000000 -c 100 http://10.0.0.2:80/ > /dev/null 2>&1; done`
-
-
-**Host B**:
-
-> - Run the demo server with fastsocket
->
->	`[root@localhost demo]# LD_PRELOAD=../library/libsocket.so ./server -w ## -a 10.0.0.2:80`
->
->   where ## is the number of workers (typically equal to the number of processers on your machine)
-
-### PROXY MODE ###
-
-In the proxy mode, three hosts are needed:
-
-- Host A acts as a work load producer
-- Host B acts as a proxy server
-- Host C acts as a backend server
-
-Assume your IP addresses are configured in the following way:
-
-
-	+--------------------+     +--------------------+     +--------------------+
-	|       Host A       |     |       Host B       |     |       Host C       |
-	|                    |     |                    |     |                    |
-	|    10.0.0.1/24     |     |    10.0.0.2/24     |     |     10.0.0.3/24    |
-	+---------+----------+     +---------+----------+     +----------+---------+
-              |                          |                           |
-	+---------+--------------------------+---------------------------+---------+
-	|                                 switch                                   |
-	+--------------------------------------------------------------------------+
-
-
-
-To run the demo, here are the steps on each of three hosts.
-
-**Host A**:
-
-> - Run the work load, here with 12 tasks:
->
->	`[root@localhost ~]# ab -n 1000000 -c 100 http://10.0.0.2:96/`
->
-> - To saturate the server, multiple ab instances are required, which can be
->   launched by the following command (12 instances in the example).
->
->   `[root@localhost ~]# N=12; for i in $(seq 1 N); do ab -n 1000000 -c 100 http://10.0.0.2:96/ > /dev/null 2>&1; done`
-
-**Host B**:
-
-> - Run the demo server with fastsocket in proxy mode
->
->	`[root@localhost demo]# LD_PRELOAD=../library/libsocket.so ./server -w ## -a 10.0.0.2:96 -x 10.0.0.3:80`
->
-
-**Host C**:
-
-> - Run the demo server with fastsocket in simple web mode
->
->	`[root@localhost demo]# LD_PRELOAD=../library/libsocket.so ./server -w ## -a 10.0.0.3:80`
->
+For more information about the demo server, please refer to [Demo](demo/README.md "Demo Server").
 
 ## EVALUATION ##
 
-For Nginx,
+### Nginx ###
 
+Some important configurations:
+
+- Worker number is set to the number of CPU cores.
 - HTTP Keep-alive is disabled on Nginx for a short connection test.
-- HTTP load fetches a 64 bytes static file from Nginx with a concurrency of 500
+- Http_load fetches a 64 bytes static file from Nginx with a concurrency of 500
   multiplied by the number of cores.
 - We enable memory cache for that static file in order to rule out any disk affection.
-- Rewriting rules from real world applictions are added.
-- Accept mutex is disabled.
+- **accept mutex is disabled**.
 
-Fastsocket on Linux 2.6.32 achieves 470K connection per second and 83%
+Note: **DO DISABLE accept_mutex!** With default Fastsocket module parameters, 
+Fastsocket has partioned listen socket, therefore, there is no need to force
+user to accept connections one by one.
+
+From the figure below, Fastsocket on Linux 2.6.32 achieves 470K connection per second and 83%
 efficiency up to 24 cores, while performance of base 2.6.32 kernel increases
 non-linearly up to 12 cores and drops dramatically to 159K with 24 cores. The
 latest 3.13 kernel doubles the throughput to 283K when using 24 cores compared
 with 2.6.32. However, it has not completely solve the scalability bottlenecks,
 preventing performance from growing when more than 12 cores are used.
 
+### HAProxy ###
 
-For HAProxy,
+Some important configurations:
 
-- RFD in Fastsocket is required.
-- A client runs http load with a concurrency of 500 multiplied by number of cores.
-- A back-end server responds each incoming HTTP request with a constant page.
+- Worker number is set to the number of CPU cores.
+- RFD(Receive Flow Deliver) in Fastsocket is enabled.
+- HTTP Keep-alive is disabled on Haproxy for a short connection test.
+- A client runs http_load with a concurrency of 500 multiplied by number of cores.
+- A backend server responds each incoming HTTP request with a 64 bytes message.
 
+As shown in the same Figure, Fastsocket presents a exellent scalability performance, 
+which is very similar to the previous nginx case. 
 Fastsocket outperforms Linux 3.13 by 14K connection per second and base 2.6.32
 by 37K when using 24 cores, though the one core throughputs are very close among
 all the three kernels.
 
 ![Throughput](images/throughput.png "Throughput")
 
-Fastsocket is deployed on servers running HAProxy in Sina Weibo production
-system. Here's the CPU utilization of two servers handling the same amount of
-requests, one is with Fastsocket and the other is not.
+### ONLINE EVALUATION ###
+
+As mentioned before, Fastsocket has already been deployed in the SINA production
+environment. One typical scenario is using Fastsocket with Haproxy to provide 
+HTTP load balance service to WEIBO and other SINA productions.
+
+In the figure below, it is the CPU utilization of a 8-core servers within 24 hours. 
+Figure (a) shows the CPU utilization before deploying Fastsocket and figure (b)
+shows the CPU utilization after deploying Fastsocket.
 
 ![Online](images/online.png "Online")
+
+We can see from the figure, what happened after Fastsocket is used:
+
+- The load of each CPU core is perfect balanced.
+- The average CPU utilization of all CPU cores is reduced by 10%.
+- As a result, the effective capacity of the Haproxy server is increased by 85%.
+
+Moreover, since the server is an old 8-core machine, we expect Fastsocket would 
+make more performance improvement when Fastsocket is deployed on a machine with 
+more CPU cores.
+
