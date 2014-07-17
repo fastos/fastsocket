@@ -1529,10 +1529,96 @@ void ip_send_reply(struct sock *sk, struct sk_buff *skb, struct ip_reply_arg *ar
 	ip_rt_put(rt);
 }
 
+static volatile unsigned cpu_id;
+struct direct_tcp_stat __percpu *direct_tcp_stats;
+
+static struct direct_tcp_stat *direct_tcp_get_online(loff_t *pos)
+{
+	struct direct_tcp_stat *rc = NULL;
+
+	while (*pos < nr_cpu_ids)
+		if (cpu_online(*pos)) {
+			rc = per_cpu_ptr(direct_tcp_stats, *pos);
+			break;
+		} else
+			++*pos;
+	cpu_id = *pos;
+
+	return rc;
+}
+
+static void *direct_tcp_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	++*pos;
+	return direct_tcp_get_online(pos);
+}
+
+static void direct_tcp_seq_stop(struct seq_file *seq, void *v)
+{
+
+}
+
+static void *direct_tcp_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	seq_printf(seq, "%s\t%-15s%-15s\n",
+		"CPU", "Fast_route", "Slow_route");
+
+	cpu_id = 0;
+
+	return direct_tcp_get_online(pos);
+}
+
+static int direct_tcp_seq_show(struct seq_file *seq, void *v)
+{
+	struct direct_tcp_stat *s = v;
+
+	seq_printf(seq, "%u\t%-15lu%-15lu\n",
+		cpu_id, s->input_route_fast, s->input_route_slow);
+
+	return 0;
+}
+
+static const struct seq_operations direct_tcp_seq_ops = {
+	.start = direct_tcp_seq_start,
+	.next  = direct_tcp_seq_next,
+	.stop  = direct_tcp_seq_stop,
+	.show  = direct_tcp_seq_show,
+};
+
+static int direct_tcp_seq_open(struct inode *inode, struct file *file)
+{
+	return seq_open(file, &direct_tcp_seq_ops);
+}
+
+ssize_t direct_tcp_reset(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+{
+	int cpu;
+	struct direct_tcp_stat *stat;
+
+	for_each_online_cpu(cpu) {
+		stat = per_cpu_ptr(direct_tcp_stats, cpu);
+		stat->input_route_fast = 0;
+		stat->input_route_slow = 0;
+	}
+
+	return 1;
+}
+static const struct file_operations direct_tcp_fops = {
+	.owner	 = THIS_MODULE,
+	.open    = direct_tcp_seq_open,
+	.read    = seq_read,
+	.llseek  = seq_lseek,
+	.release = seq_release,
+	.write   = direct_tcp_reset,
+};
+
 void __init ip_init(void)
 {
 	ip_rt_init();
 	inet_initpeers();
+
+	direct_tcp_stats = alloc_percpu(struct direct_tcp_stat);
+	proc_net_fops_create(&init_net, "direct_tcp", S_IRUGO, &direct_tcp_fops);
 
 #if defined(CONFIG_IP_MULTICAST) && defined(CONFIG_PROC_FS)
 	igmp_mc_proc_init();

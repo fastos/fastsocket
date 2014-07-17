@@ -3450,7 +3450,7 @@ static int netif_deliver_cpu(unsigned short dport)
 
 #define RESERVED_SERVICE_PORT	1024
 
-static int netif_deliver_skb(struct sk_buff *skb)
+static int get_rfd_cpu(struct sk_buff *skb)
 {
 	if (skb->protocol != htons(ETH_P_IP))
 		return -1;
@@ -3511,15 +3511,62 @@ static int netif_deliver_skb(struct sk_buff *skb)
 int enable_receive_flow_deliver = 0;
 EXPORT_SYMBOL(enable_receive_flow_deliver);
 
+static void netif_direct_tcp(struct sk_buff *skb)
+{
+	if (skb->protocol != htons(ETH_P_IP))
+		return;
+
+	if (pskb_may_pull(skb, sizeof(struct iphdr))) {
+		struct iphdr *iph = (struct iphdr *)skb->data;
+		int iphl = iph->ihl;
+		u8 ip_proto = iph->protocol;
+
+		if (ip_proto != IPPROTO_TCP)
+			return;
+
+		if (pskb_may_pull(skb, (iphl * 4) + sizeof(struct tcphdr))) {
+			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
+			struct sock *sk;
+
+			sk = __inet_lookup(&init_net, &tcp_hashinfo, iph->saddr, th->source,
+					iph->daddr, th->dest, skb->dev->ifindex);
+			if (sk) {
+				if ((sk->sk_state != TCP_TIME_WAIT) && sock_flag(sk, SOCK_DIRECT_TCP)) {
+					FPRINTK("Skb 0x%p[:%u] hit DIRECT_TCP socket 0x%p[:%u]\n", skb, ntohs(th->dest), sk, inet_sk(sk)->num);
+					if(sk->sk_rcv_dst) {
+						skb_dst_set(skb, sk->sk_rcv_dst);
+						skb->sock_dst = sk->sk_rcv_dst;
+						FPRINTK("Direct TCP socket 0x%p has dst record 0x%p[%u]\n", sk, sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt));
+					} else {
+						FPRINTK("Direct TCP socket 0x%p has not dst record\n", sk);
+					}
+					skb->peek_sk = sk;
+					FPRINTK("Store socket 0x%p in skb 0x%p\n", sk, skb);
+				} else {
+					sock_put(sk);
+					FPRINTK("Skb 0x%p[:%u] hit common socket 0x%p[:%u]\n", skb,ntohs(th->dest), sk, inet_sk(sk)->num);
+				}
+			}
+		}
+	}
+}
+
+int enable_direct_tcp = 0;
+EXPORT_SYMBOL(enable_direct_tcp);
+
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int cpu, ret;
 
+
+	if (enable_direct_tcp)
+		netif_direct_tcp(skb);
+
 	if (enable_receive_flow_deliver)
-		cpu = netif_deliver_skb(skb);
+		cpu = get_rfd_cpu(skb);
 	else
-	cpu = get_rps_cpu(skb->dev, skb, &rflow);
+		cpu = get_rps_cpu(skb->dev, skb, &rflow);
 
 	if (cpu >= 0)
 		ret = enqueue_to_backlog(skb, cpu, &rflow->last_qtail);

@@ -197,7 +197,7 @@ struct dst_entry * dst_clone(struct dst_entry * dst)
 extern void dst_release(struct dst_entry *dst);
 static inline void skb_dst_drop(struct sk_buff *skb)
 {
-	if (skb->_skb_dst)
+	if (!skb->sock_dst && skb->_skb_dst)
 		dst_release(skb_dst(skb));
 	skb->_skb_dst = 0UL;
 }

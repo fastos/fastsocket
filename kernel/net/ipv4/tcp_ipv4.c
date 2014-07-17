@@ -1621,6 +1621,23 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	if (!sk)
 		goto no_tcp_socket;
 
+	if (sock_flag(sk, SOCK_DIRECT_TCP)) {
+		FPRINTK("Skb 0x%p hit DIRECT_TCP socket 0x%p\n", skb, sk);
+		if (sk->sk_state != TCP_LISTEN) {
+			if (!sk->sk_rcv_dst) {
+				sk->sk_rcv_dst = skb_dst(skb);
+				dst_hold(sk->sk_rcv_dst);
+				FPRINTK("Record dst 0x%p[%u] on the direct TCP socket 0x%p\n", skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt), sk);
+			} else {
+				FPRINTK("Dst 0x%p[%u] is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
+			}
+		} else {
+			FPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);
+		}
+	} else {
+		FPRINTK("Skb 0x%p hit common socket 0x%p\n", skb, sk);
+	}
+
 process:
 	if (sk->sk_state == TCP_TIME_WAIT)
 		goto do_time_wait;

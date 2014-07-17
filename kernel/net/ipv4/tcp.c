@@ -1879,6 +1879,9 @@ void tcp_close(struct sock *sk, long timeout)
 	lock_sock(sk);
 	sk->sk_shutdown = SHUTDOWN_MASK;
 
+	FPRINTK("Close socket 0x%p[:%u] with dst 0x%p\n", sk, inet_sk(sk)->num, sk->sk_rcv_dst);
+
+
 	if (sk->sk_state == TCP_LISTEN) {
 		tcp_set_state(sk, TCP_CLOSE);
 

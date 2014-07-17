@@ -597,6 +597,8 @@ static void __copy_skb_header(struct sk_buff *new, const struct sk_buff *old)
 	new->network_header	= old->network_header;
 	new->mac_header		= old->mac_header;
 	skb_dst_set(new, dst_clone(skb_dst(old)));
+	new->sock_dst		= old->sock_dst;
+	new->peek_sk		= old->peek_sk;
 	new->rxhash		= old->rxhash;
 	new->encapsulation	= old->encapsulation;
 #ifdef CONFIG_XFRM

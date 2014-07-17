@@ -44,16 +44,19 @@ static int enable_fastsocket_debug = 3;
 static int enable_listen_spawn = 2;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
+extern int enable_direct_tcp;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
 module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
+module_param(enable_direct_tcp, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disabled, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
 MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disabled[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disabled, 1 = Enabled[Default]");
+MODULE_PARM_DESC(enable_direct_tcp, " Control Direct-TCP: 0 = Disbale[Default], 1 = Enabled");
 
 int inline fsocket_get_dbg_level(void)
 {
@@ -595,6 +598,14 @@ static int fsock_map_fd(struct socket *sock, int flags)
 	return fd;
 }
 
+static void fsocket_init_socket(struct socket *sock)
+{
+	if (enable_direct_tcp) {
+		sock_set_flag(sock->sk, SOCK_DIRECT_TCP);
+		FPRINTK("Socket 0x%p is set with DIRECT_TCP\n", sock->sk);
+	}
+}
+
 static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
 {
 	//TODO: Check if all these copy works.
@@ -617,6 +628,8 @@ static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
 		inet_csk(oldsock->sk)->icsk_accept_queue.rskq_defer_accept;
 	/* TCP_QUICKACK */
 	inet_csk(newsock->sk)->icsk_ack.pingpong = inet_csk(oldsock->sk)->icsk_ack.pingpong;
+
+	//TODO: Other attibutes that need to be copied
 }
 
 static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **newsock)
@@ -778,6 +791,8 @@ static int fsocket_socket(int flags)
 		EPRINTK_LIMIT(ERR, "Initialize Inet Socket failed\n");
 		goto free_sock;
 	}
+
+	fsocket_init_socket(sock);
 
 	err = fsock_map_fd(sock, flags);
 	if (err < 0) {
@@ -1352,6 +1367,8 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 		goto out_fd;
 	}
 
+	/* Accepted socket flags are copied from listen socket */
+
 	if (upeer_sockaddr) {
 		if (newsock->ops->getname(newsock, (struct sockaddr *)&address, &len, 2) < 0) {
 			EPRINTK_LIMIT(ERR, "Getname failed for accepted socket\n");
@@ -1767,6 +1784,8 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
 	if (enable_fast_epoll)
 		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
+	if (enable_direct_tcp)
+		printk(KERN_INFO "Fastsocket: Enable Direct TCP\n");
 
 	return ret;
 }
@@ -1785,6 +1804,10 @@ static void __exit fastsocket_exit(void)
 	if (enable_receive_flow_deliver) {
 		enable_receive_flow_deliver = 0;
 		printk(KERN_INFO "Fastsocket: Disable Recieve Flow Deliver\n");
+	}
+	if (enable_direct_tcp) {
+		enable_direct_tcp = 0;
+		printk(KERN_INFO "Fastsocket: Disable Direct TCP\n");
 	}
 
 

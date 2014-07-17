@@ -77,6 +77,12 @@ struct rtable
 	struct inet_peer	*peer; /* long-living peer info */
 };
 
+struct direct_tcp_stat
+{
+	unsigned long input_route_fast;
+	unsigned long input_route_slow;
+};
+
 struct ip_rt_acct
 {
 	__u32 	o_bytes;

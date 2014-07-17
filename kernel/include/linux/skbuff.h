@@ -367,10 +367,12 @@ struct sk_buff {
 	struct sk_buff		*prev;
 
 	struct sock		*sk;
+	struct sock		*peek_sk;
 	ktime_t			tstamp;
 	struct net_device	*dev;
 
 	unsigned long		_skb_dst;
+	struct dst_entry	*sock_dst;
 #ifdef CONFIG_XFRM
 	struct	sec_path	*sp;
 #endif

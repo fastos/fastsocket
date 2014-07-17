@@ -269,6 +269,7 @@ void dst_release(struct dst_entry *dst)
 
 		smp_mb__before_atomic_dec();
                newrefcnt = atomic_dec_return(&dst->__refcnt);
+	       FPRINTK("Release dst 0x%p[%u]\n", dst, atomic_read(&dst->__refcnt));
                WARN_ON(newrefcnt < 0);
 	}
 }

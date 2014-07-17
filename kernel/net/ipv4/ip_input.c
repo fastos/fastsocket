@@ -320,18 +320,27 @@ drop:
 	return -1;
 }
 
+extern struct direct_tcp_stat *direct_tcp_stats;
+
 static int ip_rcv_finish(struct sk_buff *skb)
 {
 	const struct iphdr *iph = ip_hdr(skb);
 	struct rtable *rt;
+	struct direct_tcp_stat *stat;
+
+	stat = per_cpu_ptr(direct_tcp_stats, smp_processor_id());
 
 	/*
 	 *	Initialise the virtual path cache for the packet. It describes
 	 *	how the packet travels inside Linux networking.
 	 */
+
 	if (skb_dst(skb) == NULL) {
 		int err = ip_route_input(skb, iph->daddr, iph->saddr, iph->tos,
 					 skb->dev);
+		stat->input_route_slow++;
+		FPRINTK("Skb 0x%p needs to go through route lookup\n", skb);
+
 		if (unlikely(err)) {
 			if (err == -EHOSTUNREACH)
 				IP_INC_STATS_BH(dev_net(skb->dev),
@@ -341,6 +350,9 @@ static int ip_rcv_finish(struct sk_buff *skb)
 						IPSTATS_MIB_INNOROUTES);
 			goto drop;
 		}
+	} else {
+		stat->input_route_fast++;
+		FPRINTK("Skb 0x%p has set dst cache 0x%p[%u]\n", skb, skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt));
 	}
 
 #ifdef CONFIG_NET_CLS_ROUTE

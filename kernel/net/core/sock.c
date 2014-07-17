@@ -1072,6 +1072,8 @@ static struct sock *sk_prot_alloc(struct proto *prot, gfp_t priority,
 		 */
 		sk->sk_prot_creator = prot;
 		sk_tx_queue_clear(sk);
+		sk->sk_rcv_dst = NULL;
+		FPRINTK("Initiate dst on socket 0x%p[:%u]\n", sk, inet_sk(sk)->num);
 	}
 
 	return sk;
@@ -1193,6 +1195,7 @@ void sk_free(struct sock *sk)
 	 */
 	if (atomic_dec_and_test(&sk->sk_wmem_alloc))
 		__sk_free(sk);
+		FPRINTK("Release socket 0x%p[%u]\n", sk, atomic_read(&sk->sk_wmem_alloc));
 }
 EXPORT_SYMBOL(sk_free);
 
@@ -2512,9 +2515,86 @@ static const struct file_operations proto_seq_fops = {
 	.release	= seq_release_net,
 };
 
+static volatile unsigned cpu_id;
+struct sock_lookup_stat __percpu *sock_lookup_stats;
+EXPORT_SYMBOL(sock_lookup_stats);
+
+static struct sock_lookup_stat *get_online(loff_t *pos)
+{
+	struct sock_lookup_stat *rc = NULL;
+
+	while (*pos < nr_cpu_ids)
+		if (cpu_online(*pos)) {
+			rc = per_cpu_ptr(sock_lookup_stats, *pos);
+			break;
+		} else
+			++*pos;
+	cpu_id = *pos;
+
+	return rc;
+}
+
+static void *sock_lookup_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	++*pos;
+	return get_online(pos);
+}
+
+static void sock_lookup_seq_stop(struct seq_file *seq, void *v)
+{
+
+}
+
+static void *sock_lookup_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	seq_printf(seq, "%s\t%-15s%-15s\n",
+		"CPU", "Fast_lookup", "Slow_lookup");
+
+	cpu_id = 0;
+
+	return get_online(pos);
+}
+
+static int sock_lookup_seq_show(struct seq_file *seq, void *v)
+{
+	struct sock_lookup_stat *s = v;
+
+	seq_printf(seq, "%u\t%-15lu%-15lu\n",
+		cpu_id, s->lookup_fast, s->lookup_slow);
+
+	return 0;
+}
+
+static const struct seq_operations sock_lookup_seq_ops = {
+	.start  = sock_lookup_seq_start,
+	.next   = sock_lookup_seq_next,
+	.stop   = sock_lookup_seq_stop,
+	.show   = sock_lookup_seq_show,
+};
+
+static int sock_lookup_seq_open(struct inode *inode, struct file *file)
+{
+	return seq_open_net(inode, file, &sock_lookup_seq_ops,
+			    sizeof(struct seq_net_private));
+}
+
+static const struct file_operations sock_lookup_seq_fops = {
+	.owner		= THIS_MODULE,
+	.open		= sock_lookup_seq_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release_net,
+};
+
 static __net_init int proto_init_net(struct net *net)
 {
 	if (!proc_net_fops_create(net, "protocols", S_IRUGO, &proto_seq_fops))
+		return -ENOMEM;
+
+	if (!proc_net_fops_create(net, "sock_lookup", S_IRUGO, &sock_lookup_seq_fops))
+		return -ENOMEM;
+	sock_lookup_stats = alloc_percpu(struct sock_lookup_stat);
+	if (!sock_lookup_stats)
 		return -ENOMEM;
 
 	return 0;
@@ -2523,6 +2603,7 @@ static __net_init int proto_init_net(struct net *net)
 static __net_exit void proto_exit_net(struct net *net)
 {
 	proc_net_remove(net, "protocols");
+	proc_net_remove(net, "sock_lookup");
 }
 
 

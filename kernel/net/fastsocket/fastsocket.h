@@ -34,7 +34,6 @@ static inline int fastsocket_limit(void)
 	return __ratelimit(&fastsocket_ratelimit_state);
 }
 
-#define DPRINTK(level, msg, args...) {}
 
 #ifndef DPRINTK
 #define DPRINTK(level, msg, args...) ({\

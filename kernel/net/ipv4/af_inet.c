@@ -154,6 +154,11 @@ void inet_sock_destruct(struct sock *sk)
 
 	kfree_ip_options(rcu_dereference(inet->opt));
 	dst_release(sk->sk_dst_cache);
+	if (sk->sk_rcv_dst) {
+		FPRINTK("Release dst 0x%p[%u] on socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
+		dst_release(sk->sk_rcv_dst);
+		sk->sk_rcv_dst = NULL;
+	}
 	sk_refcnt_debug_dec(sk);
 }
 EXPORT_SYMBOL(inet_sock_destruct);
