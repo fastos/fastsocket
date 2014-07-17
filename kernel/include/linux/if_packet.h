@@ -31,6 +31,7 @@ struct sockaddr_ll
 /* These ones are invisible by user level */
 #define PACKET_LOOPBACK		5		/* MC/BRD frame looped back */
 #define PACKET_FASTROUTE	6		/* Fastrouted frame	*/
+#define PACKET_FASTSOCKET	7		/* Fastsocket pool frame */
 
 /* Packet socket options */
 

@@ -31,6 +31,10 @@
 #include <linux/hrtimer.h>
 #include <linux/dma-mapping.h>
 
+#include <linux/hardirq.h>
+//#define FPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d] %s:%d\t" msg, smp_processor_id(), __FUNCTION__, __LINE__, ## args);
+#define FPRINTK(msg, args...)
+
 /* Don't change this without changing skb_csum_unnecessary! */
 #define CHECKSUM_NONE 0
 #define CHECKSUM_UNNECESSARY 1
@@ -241,6 +245,7 @@ struct ubuf_info {
  */
 struct skb_shared_info {
 	atomic_t	dataref;
+	int		pool_id;
 	unsigned short	nr_frags;
 	unsigned short	gso_size;
 	/* Warning: this field is not always filled in (UFO)! */
@@ -254,6 +259,17 @@ struct skb_shared_info {
 	/* Intermediate layers must ensure that destructor_arg
 	 * remains valid until skb destructor */
 	void *		destructor_arg;
+};
+
+struct skb_pool {
+	struct sk_buff_head free_list;
+	struct sk_buff_head recyc_list;
+	struct sk_buff_head clone_free_list;
+	struct sk_buff_head clone_recyc_list;
+	unsigned long pool_hit;
+	unsigned long slab_hit;
+	unsigned long clone_pool_hit;
+	unsigned long clone_slab_hit;
 };
 
 /* We divide dataref into two halves.  The higher 16 bits hold references
@@ -276,6 +292,11 @@ enum {
 	SKB_FCLONE_ORIG,
 	SKB_FCLONE_CLONE,
 };
+
+#define SLAB_SKB	0
+#define SLAB_SKB_CLONE	1
+#define POOL_SKB	2
+#define POOL_SKB_CLONE	3
 
 enum {
 	SKB_GSO_TCPV4 = 1 << 0,
@@ -470,10 +491,16 @@ struct sk_buff {
 	sk_buff_data_t		tail;
 	sk_buff_data_t		end;
 	unsigned char		*head,
-				*data;
+				*data,
+				*data_cache;
 	unsigned int		truesize;
+	int			pool_id;
 	atomic_t		users;
 };
+
+#define MAX_FASTSOCKET_SKB_RAW_SIZE     ( 4096 )
+#define MAX_FASTSOCKET_SKB_DATA_SIZE    ( 4096 - sizeof(struct skb_shared_info) )
+#define MAX_FASTSOCKET_POOL_SKB_NUM     ( 2048 )
 
 #ifdef __KERNEL__
 /*
@@ -504,16 +531,54 @@ extern void	       __kfree_skb(struct sk_buff *skb);
 extern struct sk_buff *__alloc_skb(unsigned int size,
 				   gfp_t priority, int fclone, int node);
 extern struct sk_buff *build_skb(void *data);
+
+#define ENABLE_COMMON_SKB_POOL	0x01
+#define ENABLE_CLONE_SKB_POOL	0x02
+#define ENABLE_ALL_SKB_POOL	0x03
+
+extern int enable_skb_pool;
+
 static inline struct sk_buff *alloc_skb(unsigned int size,
 					gfp_t priority)
 {
-	return __alloc_skb(size, priority, 0, NUMA_NO_NODE);
+	struct sk_buff *skb;
+
+	if ((enable_skb_pool & ENABLE_COMMON_SKB_POOL) && likely(in_softirq())) {
+		//printk(KERN_DEBUG "Allocate pool skb in interrupt\n");
+		skb = __alloc_skb(size, priority, POOL_SKB, -1);
+	} else {
+		//printk(KERN_DEBUG "Allocate pool skb NOT in softirq\n");
+		skb = __alloc_skb(size, priority, SLAB_SKB, -1);
+	}
+
+	FPRINTK("Allocate skb 0x%p\n", skb);
+
+	return skb;
 }
 
 static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
 					       gfp_t priority)
 {
-	return __alloc_skb(size, priority, 1, NUMA_NO_NODE);
+	struct sk_buff *skb;
+
+	WARN_ON(unlikely(in_irq()));
+
+	if ((enable_skb_pool & ENABLE_CLONE_SKB_POOL) && likely(!in_interrupt())) {
+		//printk(KERN_DEBUG "Allocate clone pool skb 0x%p NOT in interrupt\n", skb);
+		skb = __alloc_skb(size, priority, POOL_SKB_CLONE, -1);
+	} else {
+		skb = __alloc_skb(size, priority, SLAB_SKB_CLONE, -1);
+	}
+
+	FPRINTK("Allocate clone skb 0x%p\n", skb);
+
+	return skb;
+}
+
+static inline struct sk_buff *alloc_pool_skb_fclone(unsigned int size,
+					       gfp_t priority)
+{
+	return __alloc_skb(size, priority, POOL_SKB_CLONE, -1);
 }
 
 extern int skb_recycle_check(struct sk_buff *skb, int skb_size);
@@ -1572,10 +1637,14 @@ static inline void __skb_queue_purge(struct sk_buff_head *list)
  *
  *	%NULL is returned if there is no free memory.
  */
+
 static inline struct sk_buff *__dev_alloc_skb(unsigned int length,
 					      gfp_t gfp_mask)
 {
-	struct sk_buff *skb = alloc_skb(length + NET_SKB_PAD, gfp_mask);
+	struct sk_buff *skb;
+
+		skb = alloc_skb(length + NET_SKB_PAD, gfp_mask);
+
 	if (likely(skb))
 		skb_reserve(skb, NET_SKB_PAD);
 	return skb;

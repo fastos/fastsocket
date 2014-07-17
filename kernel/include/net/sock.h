@@ -585,6 +585,9 @@ enum sock_flags {
 	SOCK_ZEROCOPY, /* buffers from userspace */
 	SOCK_LOCAL, /* sock is managed in local table */
 	SOCK_DIRECT_TCP, /* bypass IP layer when receive skb */
+	SOCK_SKB_POOL, /* use skb pool when xmit skb from the socket */
+	SOCK_PASSIVE_OPEN,      /* Passive connection socket */
+	SOCK_ACTIVE_OPEN,       /* Active connection socket */
 	SOCK_RELAX = 31, /* kABI: bind conflict relax bit */
 };
 

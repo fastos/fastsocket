@@ -45,18 +45,21 @@ static int enable_listen_spawn = 2;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
 extern int enable_direct_tcp;
+extern int enable_skb_pool;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
 module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
 module_param(enable_direct_tcp, int, 0);
+module_param(enable_skb_pool, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disabled, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
 MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disabled[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disabled, 1 = Enabled[Default]");
 MODULE_PARM_DESC(enable_direct_tcp, " Control Direct-TCP: 0 = Disbale[Default], 1 = Enabled");
+MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Receive skb pool, 2 = Send skb pool,  3 = Both skb pool");
 
 int inline fsocket_get_dbg_level(void)
 {
@@ -816,11 +819,10 @@ extern void clear_tfile_check_list(void);
 extern int ep_loop_check(struct eventpoll *ep, struct file *file);
 extern struct mutex epmutex;
 
-static int fsocket_epoll_ctl(struct file *file, struct file *tfile, int fd,  int op,  struct __user epoll_event *ev)
+static int fsocket_epoll_ctl(struct eventpoll *ep, struct file *tfile, int fd,  int op,  struct __user epoll_event *ev)
 {
 	int error = -EINVAL;
 	int full_check = 0;
-	struct eventpoll *ep = file->private_data;
 	struct eventpoll *tep = NULL;
 
 	struct epitem *epi;
@@ -840,8 +842,8 @@ static int fsocket_epoll_ctl(struct file *file, struct file *tfile, int fd,  int
 	 */
 	mutex_lock(&ep->mtx);
 	if (op == EPOLL_CTL_ADD) {
-		if (!list_empty(&file->f_ep_links) ||
-		    is_file_epoll_export(tfile)) {
+		if (!list_empty(&tfile->f_ep_links) ||
+			is_file_epoll_export(tfile)) {
 			full_check = 1;
 			WARN(1, "Why do fastsocket need nested ep?!\n");
 			mutex_unlock(&ep->mtx);
@@ -895,6 +897,8 @@ static int fsocket_epoll_ctl(struct file *file, struct file *tfile, int fd,  int
 		} else
 			error = -EEXIST;
 		clear_tfile_check_list();
+		if (full_check)
+			clear_tfile_check_list();
 		break;
 	case EPOLL_CTL_DEL:
 		if (epi) {
@@ -1657,7 +1661,7 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 	}
 
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
-		ret = fsocket_epoll_ctl(efile, tfile, arg.fd, arg.op.epoll_op.ep_ctl_cmd,
+		ret = fsocket_epoll_ctl(ep, tfile, arg.fd, arg.op.epoll_op.ep_ctl_cmd,
 				arg.op.epoll_op.ev);
 	} else {
 		DPRINTK(INFO, "Target socket %d is Not Fastsocket\n", arg.fd);
@@ -1749,6 +1753,8 @@ static int __init  fastsocket_init(void)
 			num_present_cpus(), num_active_cpus());
 
 	ret = misc_register(&fastsocket_dev);
+	printk(KERN_INFO "Fastsocket: Load Module\n");
+
 	if (ret < 0) {
 		EPRINTK_LIMIT(ERR, "Register fastsocket channel device failed\n");
 		return -ENOMEM;
@@ -1786,6 +1792,8 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
 	if (enable_direct_tcp)
 		printk(KERN_INFO "Fastsocket: Enable Direct TCP\n");
+	if (enable_skb_pool)
+		printk(KERN_INFO "Fastsocket: Enable Skb Pool[Mode-%d]\n", enable_skb_pool);
 
 	return ret;
 }
@@ -1810,6 +1818,10 @@ static void __exit fastsocket_exit(void)
 		printk(KERN_INFO "Fastsocket: Disable Direct TCP\n");
 	}
 
+	if (enable_skb_pool) {
+		enable_skb_pool = 0;
+		printk(KERN_INFO "Fastsocket: Disable Skb Pool\n");
+	}
 
 	printk(KERN_INFO "Fastsocket: Remove Module\n");
 }

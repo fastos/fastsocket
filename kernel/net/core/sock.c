@@ -2578,12 +2578,23 @@ static int sock_lookup_seq_open(struct inode *inode, struct file *file)
 			    sizeof(struct seq_net_private));
 }
 
+ssize_t sock_lookup_reset(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu)
+		memset(per_cpu_ptr(sock_lookup_stats, cpu), 0, sizeof(struct netif_deliver_stats));
+
+	return 1;
+}
 static const struct file_operations sock_lookup_seq_fops = {
 	.owner		= THIS_MODULE,
 	.open		= sock_lookup_seq_open,
 	.read		= seq_read,
 	.llseek		= seq_lseek,
 	.release	= seq_release_net,
+	.write		= sock_lookup_reset,
+
 };
 
 static __net_init int proto_init_net(struct net *net)

@@ -3416,6 +3416,12 @@ out:
 
 static DEFINE_PER_CPU(struct netif_deliver_stats, deliver_stats);
 
+static int netif_pass_cpu(unsigned short dport)
+{
+	__get_cpu_var(deliver_stats).pass++;
+	return -1;
+}
+
 static int netif_deliver_cpu(unsigned short dport)
 {
 	int cur_cpu = smp_processor_id();
@@ -3465,26 +3471,22 @@ static int get_rfd_cpu(struct sk_buff *skb)
 
 		if (pskb_may_pull(skb, (iphl * 4) + sizeof(struct tcphdr))) {
 			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
-			struct sock *sk;
 
 			if (ntohs(th->source) < RESERVED_SERVICE_PORT) {
 				return netif_deliver_cpu(ntohs(th->dest));
 			}
 
 			if (ntohs(th->dest) < RESERVED_SERVICE_PORT) {
-				__get_cpu_var(deliver_stats).pass++;
-				return -1;
+				return netif_pass_cpu(ntohs(th->dest));
 			}
 
-			sk = __inet_lookup_listener(&init_net, &tcp_hashinfo, iph->saddr, th->source, iph->daddr, ntohs(th->dest), skb->dev->ifindex);
-
-			if (sk) {
-				skb->sk = sk;
-				__get_cpu_var(deliver_stats).pass++;
-				return -1;
-			} else {
-			//FIXME: Should we lookup established table to make sure?
-				return netif_deliver_cpu(ntohs(th->dest));
+			if (!skb->peek_sk)
+				skb->peek_sk = __inet_lookup(&init_net, &tcp_hashinfo, iph->saddr, th->source, iph->daddr, th->dest, skb->dev->ifindex);
+			if (likely(skb->peek_sk)) {
+				if (sock_flag(skb->peek_sk, SOCK_ACTIVE_OPEN))
+					return netif_deliver_cpu(ntohs(th->dest));
+				else
+					return netif_pass_cpu(ntohs(th->dest));
 			}
 		}
 	}

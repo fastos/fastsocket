@@ -1621,6 +1621,10 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	if (!sk)
 		goto no_tcp_socket;
 
+process:
+	if (sk->sk_state == TCP_TIME_WAIT)
+		goto do_time_wait;
+
 	if (sock_flag(sk, SOCK_DIRECT_TCP)) {
 		FPRINTK("Skb 0x%p hit DIRECT_TCP socket 0x%p\n", skb, sk);
 		if (sk->sk_state != TCP_LISTEN) {
@@ -1637,10 +1641,6 @@ int tcp_v4_rcv(struct sk_buff *skb)
 	} else {
 		FPRINTK("Skb 0x%p hit common socket 0x%p\n", skb, sk);
 	}
-
-process:
-	if (sk->sk_state == TCP_TIME_WAIT)
-		goto do_time_wait;
 
 	if (unlikely(iph->ttl < sk_get_min_ttl(sk))) {
 		NET_INC_STATS_BH(net, LINUX_MIB_TCPMINTTLDROP);
