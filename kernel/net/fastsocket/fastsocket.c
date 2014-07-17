@@ -46,6 +46,7 @@ extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
 extern int enable_direct_tcp;
 extern int enable_skb_pool;
+extern int enable_receive_cpu_selection;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
@@ -53,6 +54,7 @@ module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
 module_param(enable_direct_tcp, int, 0);
 module_param(enable_skb_pool, int, 0);
+module_param(enable_receive_cpu_selection, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disabled, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
@@ -60,6 +62,7 @@ MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 
 MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disabled, 1 = Enabled[Default]");
 MODULE_PARM_DESC(enable_direct_tcp, " Control Direct-TCP: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Receive skb pool, 2 = Send skb pool,  3 = Both skb pool");
+MODULE_PARM_DESC(enable_receive_cpu_selection, " Control RCS: 0 = Disabled[Default], 1 = Enabled");
 
 int inline fsocket_get_dbg_level(void)
 {
@@ -1794,7 +1797,8 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Direct TCP\n");
 	if (enable_skb_pool)
 		printk(KERN_INFO "Fastsocket: Enable Skb Pool[Mode-%d]\n", enable_skb_pool);
-
+	if (enable_receive_cpu_selection)
+		printk(KERN_INFO "Fastsocket: Enable Receive CPU Selection\n");
 	return ret;
 }
 
@@ -1821,6 +1825,11 @@ static void __exit fastsocket_exit(void)
 	if (enable_skb_pool) {
 		enable_skb_pool = 0;
 		printk(KERN_INFO "Fastsocket: Disable Skb Pool\n");
+	}
+
+	if (enable_receive_cpu_selection) {
+		enable_receive_cpu_selection = 0;
+		printk(KERN_INFO "Fastsocket: Disable CPU Selection\n");
 	}
 
 	printk(KERN_INFO "Fastsocket: Remove Module\n");

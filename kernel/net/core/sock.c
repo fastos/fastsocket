@@ -1142,6 +1142,7 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
 	sk = sk_prot_alloc(prot, priority | __GFP_ZERO, family);
 	if (sk) {
 		sk->sk_family = family;
+		sk->sk_bound_cpu = -1;
 		/*
 		 * See comment in struct sock definition to understand
 		 * why we need sk_prot_creator -acme
@@ -1300,6 +1301,7 @@ struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
 		sk_refcnt_debug_inc(newsk);
 		sk_set_socket(newsk, NULL);
 		newsk->sk_sleep	 = NULL;
+		newsk->sk_bound_cpu = -1;
 
 		if (newsk->sk_prot->sockets_allocated)
 			percpu_counter_inc(newsk->sk_prot->sockets_allocated);
@@ -2597,6 +2599,90 @@ static const struct file_operations sock_lookup_seq_fops = {
 
 };
 
+
+/* Output receive cpu selection stats */
+struct rcs_lookup_stat __percpu *rcs_lookup_stats;
+EXPORT_SYMBOL(rcs_lookup_stats);
+
+static struct rcs_lookup_stat *get_rcs_online(loff_t *pos)
+{
+	struct rcs_lookup_stat *rc = NULL;
+
+	while (*pos < nr_cpu_ids)
+		if (cpu_online(*pos)) {
+			rc = per_cpu_ptr(rcs_lookup_stats, *pos);
+			break;
+		} else
+			++*pos;
+	cpu_id = *pos;
+
+	return rc;
+}
+
+static void *rcs_lookup_seq_next(struct seq_file *seq, void *v, loff_t *pos)
+{
+	++*pos;
+	return get_rcs_online(pos);
+}
+
+static void rcs_lookup_seq_stop(struct seq_file *seq, void *v)
+{
+
+}
+
+static void *rcs_lookup_seq_start(struct seq_file *seq, loff_t *pos)
+{
+	seq_printf(seq, "%s\t%-15s\n",
+		"CPU", "RCS Hit");
+
+	cpu_id = 0;
+
+	return get_rcs_online(pos);
+}
+
+static int rcs_lookup_seq_show(struct seq_file *seq, void *v)
+{
+	struct rcs_lookup_stat *s = v;
+
+	seq_printf(seq, "%u\t%-15lu\n",
+		cpu_id, s->rcs_hit);
+
+	return 0;
+}
+
+static const struct seq_operations rcs_lookup_seq_ops = {
+	.start  = rcs_lookup_seq_start,
+	.next   = rcs_lookup_seq_next,
+	.stop   = rcs_lookup_seq_stop,
+	.show   = rcs_lookup_seq_show,
+};
+
+static int rcs_lookup_seq_open(struct inode *inode, struct file *file)
+{
+	return seq_open_net(inode, file, &rcs_lookup_seq_ops,
+			    sizeof(struct seq_net_private));
+}
+
+ssize_t rcs_lookup_reset(struct file *file, const char __user *buf, size_t size, loff_t *ppos)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu)
+		memset(per_cpu_ptr(rcs_lookup_stats, cpu), 0, sizeof(struct netif_deliver_stats));
+
+	return 1;
+}
+
+static const struct file_operations rcs_lookup_seq_fops = {
+	.owner		= THIS_MODULE,
+	.open		= rcs_lookup_seq_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= seq_release_net,
+	.write		= rcs_lookup_reset,
+
+};
+
 static __net_init int proto_init_net(struct net *net)
 {
 	if (!proc_net_fops_create(net, "protocols", S_IRUGO, &proto_seq_fops))
@@ -2604,8 +2690,13 @@ static __net_init int proto_init_net(struct net *net)
 
 	if (!proc_net_fops_create(net, "sock_lookup", S_IRUGO, &sock_lookup_seq_fops))
 		return -ENOMEM;
+	if (!proc_net_fops_create(net, "rcs_lookup", S_IRUGO, &rcs_lookup_seq_fops))
+		return -ENOMEM;
 	sock_lookup_stats = alloc_percpu(struct sock_lookup_stat);
 	if (!sock_lookup_stats)
+		return -ENOMEM;
+	rcs_lookup_stats = alloc_percpu(struct rcs_lookup_stat);
+	if (!rcs_lookup_stats)
 		return -ENOMEM;
 
 	return 0;

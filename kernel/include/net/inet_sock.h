@@ -289,6 +289,10 @@ static inline void inet_rps_record_flow(struct sock *sk)
 	rcu_read_unlock();
 }
 
+static inline void inet_rcs_record_cpu(struct sock *sk) {
+	sk->sk_bound_cpu = smp_processor_id();
+}
+
 static inline void inet_rps_reset_flow(struct sock *sk)
 {
 	struct rps_sock_flow_table *sock_flow_table;

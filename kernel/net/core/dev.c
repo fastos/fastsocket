@@ -3556,6 +3556,45 @@ static void netif_direct_tcp(struct sk_buff *skb)
 int enable_direct_tcp = 0;
 EXPORT_SYMBOL(enable_direct_tcp);
 
+static int get_rcs_cpu(struct sk_buff *skb) {
+	struct rcs_lookup_stat *stat;
+	int cur_cpu = smp_processor_id();
+
+	if (skb->protocol != htons(ETH_P_IP))
+		return -1;
+
+	stat = per_cpu_ptr(rcs_lookup_stats, cur_cpu);
+
+	if (pskb_may_pull(skb, sizeof(struct iphdr))) {
+		struct iphdr *iph = (struct iphdr *)skb->data;
+		int iphl = iph->ihl;
+		u8 ip_proto = iph->protocol;
+
+		if (ip_proto != IPPROTO_TCP)
+			return -1;
+
+		if (pskb_may_pull(skb, (iphl * 4) + sizeof(struct tcphdr))) {
+			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
+			struct sock *sk;
+
+			sk = __inet_lookup(&init_net, &tcp_hashinfo, iph->saddr, th->source,
+					iph->daddr, th->dest, skb->dev->ifindex);
+
+			if (sk && sk->sk_bound_cpu != -1) {
+				stat->rcs_hit++;
+				if (sk->sk_bound_cpu != cur_cpu && sk->sk_state != TCP_TIME_WAIT) {
+					return sk->sk_bound_cpu;
+				} else {
+					sock_put(sk);
+				}
+			}
+		}
+	}
+	return -1;
+}
+int enable_receive_cpu_selection = 0;
+EXPORT_SYMBOL(enable_receive_cpu_selection);
+
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
@@ -3567,6 +3606,8 @@ int netif_receive_skb(struct sk_buff *skb)
 
 	if (enable_receive_flow_deliver)
 		cpu = get_rfd_cpu(skb);
+	else if (enable_receive_cpu_selection)
+		cpu = get_rcs_cpu(skb);
 	else
 		cpu = get_rps_cpu(skb->dev, skb, &rflow);
 

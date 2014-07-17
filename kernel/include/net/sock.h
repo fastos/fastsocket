@@ -305,6 +305,8 @@ struct sock {
 #endif
 	__u32			sk_mark;
 	u32			sk_classid;
+	unsigned long		sk_cpumask;
+	long			sk_bound_cpu;
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk, int bytes);
 	void			(*sk_write_space)(struct sock *sk);
@@ -1790,7 +1792,13 @@ struct sock_lookup_stat
 	unsigned long lookup_slow;
 };
 
+struct rcs_lookup_stat
+{
+	unsigned long rcs_hit;
+};
+
 extern struct sock_lookup_stat *sock_lookup_stats;
+extern struct rcs_lookup_stat *rcs_lookup_stats;
 
 static inline struct sock *skb_steal_sock(struct sk_buff *skb)
 {
