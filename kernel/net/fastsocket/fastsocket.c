@@ -1276,7 +1276,7 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 	return -EAGAIN;
 }
 
-static int fsocket_spawn_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
+static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
 		int __user *upeer_addrlen, int flags)
 {
 	int err = 0, newfd, len;
@@ -1396,7 +1396,7 @@ int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
 
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
 		DPRINTK(DEBUG, "Accept fastsocket %d\n", arg.fd);
-		ret = fsocket_spawn_accept(tfile, arg.op.accept_op.sockaddr,
+		ret = fsocket_accept(tfile, arg.op.accept_op.sockaddr,
 				arg.op.accept_op.sockaddr_len, arg.op.accept_op.flags);
 	} else {
 		DPRINTK(INFO, "Accept non-fastsocket %d\n", arg.fd);
@@ -1404,6 +1404,45 @@ int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
 	}
 	fput_light(tfile, fput_need);
 
+	return ret;
+}
+
+static int fsocket_listen(struct file *file, int backlog)
+{
+	struct socket *sock, *lsock;
+	struct file *sfile;
+	int ret = 0;
+	int old_backlog;
+
+	sock = (struct socket *)file->private_data;
+	if (sock) {
+		ret = sock->ops->listen(sock, backlog);
+		if (ret < 0)
+			goto out;
+	} else {
+		ret = -EBADF;
+		goto out;
+	}
+
+	sfile = file->sub_file;
+	if (sfile) {
+		old_backlog = sock->sk->sk_max_ack_backlog;
+		lsock = (struct socket *)file->private_data;
+		if (lsock) {
+			ret = sock->ops->listen(lsock, backlog);
+			if (ret < 0)
+				goto restore_out;
+		} else {
+			ret = -EBADF;
+			goto restore_out;
+		}
+	}
+
+	goto out;
+
+restore_out:
+	sock->sk->sk_max_ack_backlog = old_backlog;
+out:
 	return ret;
 }
 
@@ -1434,12 +1473,11 @@ static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 			tfile->f_mode |= FMODE_SINGLE_WAKEUP;
 			tfile->f_mode &= ~FMODE_BIND_EPI;
 		}
-
+		ret = fsocket_listen(tfile, backlog);
 	} else {
 		DPRINTK(INFO, "Listen non-fastsocket %d\n", fd);
+		ret = sys_listen(fd, backlog);
 	}
-
-	ret = sys_listen(fd, backlog);
 
 	fput_light(tfile, fput_needed);
 
