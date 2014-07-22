@@ -51,7 +51,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
-MODULE_VERSION("1.0.1");
+MODULE_VERSION("1.0.0");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
 
 static int enable_fastsocket_debug = 3;
@@ -886,6 +886,9 @@ static int fsocket_epoll_ctl(struct file *file, struct file *tfile, int fd,  int
 			if (sfile && !error) {
 				DPRINTK(DEBUG, "Insert spawned listen socket %d\n", fd);
 				error = ep_insert(ep, &epds, sfile, fd, full_check);
+				if (error < 0)
+					EPRINTK_LIMIT(ERR, "Insert sub socket %d to epoll failed\n", fd);
+					//FIXME: Rollback the epoll opertation of the original file.
 			}
 		} else
 			error = -EEXIST;
@@ -901,16 +904,20 @@ static int fsocket_epoll_ctl(struct file *file, struct file *tfile, int fd,  int
 
 				DPRINTK(DEBUG, "Remove spawned listen socket %d\n", fd);
 				if (sfile->f_mode & FMODE_BIND_EPI) {
-					DPRINTK(DEBUG, "File 0x%p binds epi\n", sfile);
+					DPRINTK(DEBUG, "Subfile 0x%p binds epi 0x%p\n", sfile, sfile->f_epi);
 					sepi = sfile->f_epi;
 				} else {
-					DPRINTK(DEBUG, "File 0x%p binds NO epi\n", sfile);
+					DPRINTK(DEBUG, "Subfile 0x%p binds NO epi\n", sfile);
 					sepi = ep_find(ep, sfile, fd);
 				}
-				if (sepi)
+				if (sepi) {
 					error = ep_remove(ep, sepi);
-				else
+					if (error < 0)
+						EPRINTK_LIMIT(ERR, "Remove sub socket %d from epoll failed\n", fd);
+						//FIXME: Rollback the epoll opertation of the original file.
+				} else {
 					EPRINTK_LIMIT(ERR, "No sub epoll item for socket %d\n", fd);
+				}
 			}
 		} else
 			error = -ENOENT;
@@ -921,8 +928,27 @@ static int fsocket_epoll_ctl(struct file *file, struct file *tfile, int fd,  int
 			DPRINTK(DEBUG, "Modify common socket %d\n", fd);
 			error = ep_modify(ep, epi, &epds);
 			if (sfile && !error) {
+				struct epitem *sepi;
+				error = -ENOENT;
+
 				DPRINTK(DEBUG, "Modify spawned listen socket %d\n", fd);
-				error = ep_modify(ep, epi, &epds);
+
+				if (sfile->f_mode & FMODE_BIND_EPI) {
+					DPRINTK(DEBUG, "Subfile 0x%p binds epi 0x%p\n", sfile, sfile->f_epi);
+					sepi = sfile->f_epi;
+				} else {
+					DPRINTK(DEBUG, "Subfile 0x%p binds NO epi\n", sfile);
+					sepi = ep_find(ep, sfile, fd);
+				}
+
+				if (sepi) {
+					error = ep_modify(ep, epi, &epds);
+					if (error < 0)
+						EPRINTK_LIMIT(ERR, "Modify sub socket %d in epoll failed\n", fd);
+						//FIXME: Rollback the epoll opertation of the original file.
+				} else {
+					EPRINTK_LIMIT(ERR, "No sub epoll item for socket %d\n", fd);
+				}
 			}
 		} else
 			error = -ENOENT;
