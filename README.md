@@ -149,16 +149,9 @@ remaining configuration.
 
 *eth0* is the interface to be used and should be changed according to your
 system configuration. The script will automatically check system and NIC 
-parameters, then configures various features. Please make sure you see the 
-following line at the end of the output:
-
-	Fastsocket has successfully configured eth0
+parameters, then configures various features.
 
 If you are interested in how nic.sh works, please refer to [Scripts](scripts/README.md "Configuration Scripts").
-
-A higher limit of opened files per process is sometimes needed for stress testing:
-
-	[root@localhost fastsocket]# ulimit -n 65536
 
 ## USAGE ##
 
