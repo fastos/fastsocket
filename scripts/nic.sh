@@ -152,15 +152,14 @@ info_msg "    Bus info: $BUS"
 info_msg "    Model: $MODEL"
 info_msg "    Driver: $DRIVER"
 info_msg "    Number of..."
-info_msg "        cores: $CORES"
-info_msg "        interrupts: $INTRS"
+info_msg "        CPU cores: $CORES"
 info_msg "        software Tx queues: $TX_QUEUES"
 info_msg "        software Rx queues: $RX_QUEUES"
 info_msg "        hardware queues: $HW_QUEUES"
 
 # Allow 3000 interrupts at most per second
 ethtool -C $IFACE rx-usecs 333 > /dev/null 2>&1
-info_msg "    Interrupt throttle rate: 3000"
+info_msg "    Interrupt throttle rate is set to 3000"
 
 # Use XPS to set affinities of Tx queues
 # Note: This is only done when we have more Tx queues than cores.
@@ -184,6 +183,13 @@ else
     info_msg "    RPS disabled"
 fi
 
+# Disable irqbalance
+if ps aux | grep irqbalance | grep -v grep; then
+    info_msg "Disable irqbalance..."
+    # XXX Do we have a more moderate way to do this?
+    killall irqbalance > /dev/null 2>&1
+fi
+
 # Set interrupt affinities
 i=0
 intr_list $IFACE $DRIVER | while read irq; do
@@ -191,22 +197,15 @@ intr_list $IFACE $DRIVER | while read irq; do
     i=$((i+1))
 done
 
+info_msg "    NIC interrupt affinity is configured."
+
 # Enlarge open file limits
-ulimit -n 65536
-
-info_msg "Allow more time-wait socket buckets..."
-sysctl -w net.ipv4.tcp_max_tw_buckets=180000 > /dev/null 2>&1
-
-info_msg "Disable nf_conntrack..."
-iptables -A PREROUTING -p tcp -j NOTRACK > /dev/null 2>&1
-iptables -A PREROUTING -p udp -j NOTRACK > /dev/null 2>&1
-iptables -t raw -A OUTPUT -p tcp -j NOTRACK > /dev/null 2>&1
-iptables -t raw -A OUTPUT -p udp -j NOTRACK > /dev/null 2>&1
-
-if ps aux | grep irqbalance | grep -v grep; then
-    info_msg "Disable irqbalance..."
-    # XXX Do we have a more moderate way to do this?
-    killall irqbalance > /dev/null 2>&1
+if [ `ulimit -n` -le 1024 ]; then
+    warn_msg "Max open file limit is possibly too small for a performance test."
 fi
 
-info_msg "${GREEN}Fastsocket has successfully configured on $IFACE$NC"
+if lsmod | grep iptable > /dev/null 2>&1; then
+    warn_msg "Iptables is active and it has a negative impact on network performance. It is recommended to turn it off."
+fi	
+
+info_msg "${GREEN}System and $IFACE have been successfully configured for best performance.$NC"
