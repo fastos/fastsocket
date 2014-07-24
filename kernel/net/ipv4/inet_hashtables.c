@@ -156,7 +156,7 @@ static inline int compute_score(struct sock *sk, struct net *net,
 {
 	int score = -1;
 	struct inet_sock *inet = inet_sk(sk);
-	int processor_id = smp_processor_id();
+	//int processor_id = smp_processor_id();
 
 	if (net_eq(sock_net(sk), net) && inet->num == hnum &&
 			!ipv6_only_sock(sk)) {
@@ -173,11 +173,11 @@ static inline int compute_score(struct sock *sk, struct net *net,
 			score += 4;
 		}
 
-		if (sk->sk_cpumask == 0)
-			score++;
+		//if (sk->sk_cpumask == 0)
+		//	score++;
 
-		if (sk->sk_cpumask & ((unsigned long)1 << processor_id))
-			score += 2;
+		//if (sk->sk_cpumask & ((unsigned long)1 << processor_id))
+		//	score += 2;
 	}
 	return score;
 }
@@ -541,23 +541,26 @@ static void __inet_hash(struct sock *sk)
 
 	hash = inet_sk_listen_hashfn(sk);
 
-	if (!sk->sk_cpumask) {
+	//if (sock_flag(sk, SOCK_LOCAL) && (sk->sk_cpumask >= 0)) {
+	if (!sock_flag(sk, SOCK_LOCAL)) {
 		ilb = &hashinfo->listening_hash[hash];
 
-	spin_lock(&ilb->lock);
-	__sk_nulls_add_node_rcu(sk, &ilb->head);
-	sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
-	spin_unlock(&ilb->lock);
+		spin_lock(&ilb->lock);
+		__sk_nulls_add_node_rcu(sk, &ilb->head);
+		sock_prot_inuse_add(sock_net(sk), sk->sk_prot, 1);
+		spin_unlock(&ilb->lock);
 
 		__get_cpu_var(hash_stats).global_listen_hash++;
 	} else {
 		struct inet_listen_hashtable *ilt;
 		int cpu;
 
-		for_each_possible_cpu(cpu) {
-			if (sk->sk_cpumask & ((unsigned long)1 << cpu))
-				break;
-		}
+		//for_each_possible_cpu(cpu) {
+		//	if (sk->sk_cpumask & ((unsigned long)1 << cpu))
+		//		break;
+		//}
+		
+		cpu = sk->sk_cpu_affinity;		
 
 		ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);
 		ilb = &ilt->listening_hash[hash];
@@ -592,7 +595,7 @@ void inet_unhash(struct sock *sk)
 
 	if (sk->sk_state == TCP_LISTEN) {
 		int hash = inet_sk_listen_hashfn(sk);
-		if (!sk->sk_cpumask) {
+		if (!sock_flag(sk, SOCK_LOCAL)) {
 			lock = &hashinfo->listening_hash[hash].lock;
 
 			__get_cpu_var(hash_stats).global_listen_unhash++;
@@ -601,10 +604,12 @@ void inet_unhash(struct sock *sk)
 			struct inet_listen_hashtable *ilt;
 			int cpu;
 
-			for_each_possible_cpu(cpu) {
-				if (sk->sk_cpumask & ((unsigned long)1 << cpu))
-					break;
-			}
+			//for_each_possible_cpu(cpu) {
+			//	if (sk->sk_cpumask & ((unsigned long)1 << cpu))
+			//		break;
+			//}
+			
+			cpu = sk->sk_cpu_affinity;
 			ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);
 			ilb = &ilt->listening_hash[hash];
 

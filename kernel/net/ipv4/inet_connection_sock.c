@@ -64,7 +64,7 @@ int inet_csk_bind_conflict(const struct sock *sk,
 	uid_t uid = sock_i_uid((struct sock *)sk);
 
 	//FIXME: Is it check enough?
-	if (sk->sk_cpumask)
+	if (sock_flag((struct sock *)sk, SOCK_LOCAL) && (sk->sk_cpu_affinity >= 0))
 		return 0;
 
 	/*

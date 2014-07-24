@@ -677,7 +677,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		goto out;
 	}
 
-	sock->sk->sk_cpumask = 0;
+	sock->sk->sk_cpu_affinity = -1;
 
 	fsocket_copy_socket(oldsock, sock);
 
@@ -984,27 +984,34 @@ static void fsocket_process_affinity_restore(int cpu)
 	spawn_cpu--;
 }
 
-static int fsocket_process_affinity_check(void)
+/* Currently, user required CPU affinity is not supported. However, the feature 
+ * function suppport is kept for future complete implementation. */
+
+static int fsocket_process_affinity_check(int rcpu)
 {
 	int ccpu, ncpu, cpu;
 	int tcpu = -1;
 	struct cpumask omask;
-	struct socket *sock;
+	//struct socket *sock;
 
 	if (enable_listen_spawn == DISABLE_LISTEN_SPAWN) {
 		EPRINTK_LIMIT(ERR, "Module para disable listen-spawn feature\n");
 		return -EINVAL;
 	}
 
+	if ((rcpu >= 0) && (rcpu > num_active_cpus())) {
+		EPRINTK_LIMIT(ERR, "Requested CPU %d is greater than system available CPU core %d\n", rcpu, num_active_cpus());
+		return -EINVAL;
+	}
+
+	/* Respect the choice of user */
+
+	if (rcpu >= 0)
+		return rcpu;
+
 	sched_getaffinity(current->pid, &omask);
 	ccpu = cpumask_first(&omask);
 	ncpu = cpumask_next(ccpu, &omask);
-
-	if (ccpu > (sizeof(sock->sk->sk_cpumask) << 3))
-	{
-		EPRINTK_LIMIT(ERR, "CPU number exceeds size of cpumask\n");
-		return -EINVAL;
-	}
 
 	if (ccpu >= nr_cpumask_bits) {
 		DPRINTK(DEBUG, "Current process affinity is messed up\n");
@@ -1020,6 +1027,8 @@ static int fsocket_process_affinity_check(void)
 		EPRINTK_LIMIT(ERR, "Module para disable autoset affinity for listen-spawn\n");
 		return -EPERM;
 	}
+
+	/* Choose a unused CPU core to bind this process */	
 
 	for (cpu = spawn_cpu; cpu < num_active_cpus(); cpu++) {
 		if (!cpu_isset(cpu, spawn_cpuset)) {
@@ -1044,14 +1053,15 @@ static int fsocket_process_affinity_check(void)
 
 static void fsocket_sk_affinity_set(struct socket *sock, int cpu)
 {
-	sock->sk->sk_cpumask = (unsigned long)1 << cpu;
+	sock_set_flag(sock->sk, SOCK_LOCAL);
+	sock->sk->sk_cpu_affinity = cpu;
 
-	DPRINTK(DEBUG, "Bind this listen socket to CPU %d with bitmap 0x%02lx\n", cpu, sock->sk->sk_cpumask);
+	DPRINTK(DEBUG, "Bind this listen socket to CPU %d", cpu);
 }
 
 static void fsocket_sk_affinity_release(struct socket *sock)
 {
-	sock->sk->sk_cpumask = 0;
+	sock->sk->sk_cpu_affinity = -1;
 }
 
 static void fsocket_filp_close_spawn(int fd)
@@ -1125,7 +1135,7 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 		goto out;
 	}
 
-	ret = fsocket_process_affinity_check();
+	ret = fsocket_process_affinity_check(tcpu);
 	if (ret < 0)
 	{
 		EPRINTK_LIMIT(ERR, "Set CPU affinity for process failed\n");

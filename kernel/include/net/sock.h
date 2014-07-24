@@ -139,6 +139,7 @@ struct sock_common {
 #else
 	unsigned char		skc_reuse;
 #endif
+	int 			skc_cpu_affinity;
 	int			skc_bound_dev_if;
 	struct hlist_node	skc_bind_node;
 	struct proto		*skc_prot;
@@ -228,6 +229,8 @@ struct sock {
 #define sk_state		__sk_common.skc_state
 #define sk_reuse		__sk_common.skc_reuse
 #define sk_reuseport		__sk_common.skc_reuseport
+#define sk_reuseport		__sk_common.skc_reuseport
+#define sk_cpu_affinity		__sk_common.skc_cpu_affinity
 #define sk_bound_dev_if		__sk_common.skc_bound_dev_if
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_prot			__sk_common.skc_prot
@@ -301,7 +304,6 @@ struct sock {
 #endif
 	__u32			sk_mark;
 	u32			sk_classid;
-	unsigned long		sk_cpumask;
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk, int bytes);
 	void			(*sk_write_space)(struct sock *sk);
@@ -580,6 +582,7 @@ enum sock_flags {
 	SOCK_TIMESTAMPING_SYS_HARDWARE, /* %SOF_TIMESTAMPING_SYS_HARDWARE */
 	SOCK_RXQ_OVFL,
 	SOCK_ZEROCOPY, /* buffers from userspace */
+	SOCK_LOCAL, /* sock is managed in local table */
 	SOCK_RELAX = 31, /* kABI: bind conflict relax bit */
 };
 
