@@ -52,7 +52,7 @@
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
 MODULE_VERSION("1.0.0");
-MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket application");
+MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket applications");
 
 static int enable_fastsocket_debug = 3;
 static int enable_listen_spawn = 2;
@@ -65,9 +65,9 @@ module_param(enable_receive_flow_deliver, int, 0);
 module_param(enable_fast_epoll, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
-MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disbale, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
-MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disbale[Default], 1 = Enabled");
-MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disbale, 1 = Enabled[Default]");
+MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disabled, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
+MODULE_PARM_DESC(enable_receive_flow_deliver, " Control Receive-Flow-Deliver: 0 = Disabled[Default], 1 = Enabled");
+MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disabled, 1 = Enabled[Default]");
 
 int inline fsocket_get_dbg_level(void)
 {
