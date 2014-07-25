@@ -898,11 +898,9 @@ static void hash_seq_stop(struct seq_file *seq, void *v)
 
 static void *hash_seq_start(struct seq_file *seq, loff_t *pos)
 {
-	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s%-15s\n",
+	seq_printf(seq, "%s\t%-15s%-15s%-15s%-15s%-15s%-15s\n",
 		"CPU", "Loc_lst_lookup", "Glo_lst_lookup",
-		"Com_accetp", "Com_accept_F", "Loc_accept",
-		"Loc_accept_F", "Loc_accept_A", "Glo_accept",
-		"Glo_accept_F", "Glo_accept_A");
+		"Com_accetp", "Loc_accept", "Rem_accept", "Glo_accept");
 
 	cpu_id = 0;
 
@@ -913,11 +911,9 @@ static int hash_seq_show(struct seq_file *seq, void *v)
 {
 	struct inet_hash_stats *s = v;
 
-	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu\n",
+	seq_printf(seq, "%u\t%-15lu%-15lu%-15lu%-15lu%-15lu%-15lu\n",
 		cpu_id, s->local_listen_lookup, s->global_listen_lookup,
-		s->common_accept, s->common_accept_failed, s->local_accept,
-		s->local_accept_failed, s->local_accept_again, s->global_accept,
-		s->global_accept_failed, s->global_accept_again);
+		s->common_accept, s->local_accept, s->remote_accept, s->global_accept);
 
 	return 0;
 }

@@ -1234,12 +1234,12 @@ static inline int fsocket_common_accept(struct socket *sock, struct socket *news
 	ret =  sock->ops->accept(sock, newsock, flags);
 	if (!ret)
 		__get_cpu_var(hash_stats).common_accept++;
-	else {
-		if (ret != -EAGAIN)
-			__get_cpu_var(hash_stats).common_accept_failed++;
-		else
-			__get_cpu_var(hash_stats).common_accept_again++;
-	}
+	//else {
+	//	if (ret != -EAGAIN)
+	//		__get_cpu_var(hash_stats).common_accept_failed++;
+	//	else
+	//		__get_cpu_var(hash_stats).common_accept_again++;
+	//}
 	return ret;
 }
 
@@ -1248,14 +1248,18 @@ static inline int fsocket_local_accept(struct socket *sock, struct socket *newso
 	int ret;
 
 	ret = sock->ops->accept(sock, newsock, flags);
-	if (!ret)
-		__get_cpu_var(hash_stats).local_accept++;
-	else {
-		if (unlikely(ret != -EAGAIN))
-			__get_cpu_var(hash_stats).local_accept_failed++;
+	if (!ret) {
+		if (sock->sk->sk_cpu_affinity == smp_processor_id())
+			__get_cpu_var(hash_stats).local_accept++;
 		else
-			__get_cpu_var(hash_stats).local_accept_again++;
+			__get_cpu_var(hash_stats).remote_accept++;
 	}
+	//else {
+	//	if (unlikely(ret != -EAGAIN))
+	//		__get_cpu_var(hash_stats).local_accept_failed++;
+	//	else
+	//		__get_cpu_var(hash_stats).local_accept_again++;
+	//}
 	return ret;
 }
 
@@ -1270,17 +1274,17 @@ static inline int fsocket_global_accept(struct socket *sock, struct socket *news
 
 	percpu_add(global_spawn_accept, 1);
 
-	//FIXME: Is the policy good?
+	//TODO: Is the policy good?
 	if (fsocket_need_global_accept()) {
 		ret = sock->ops->accept(sock, newsock, flags);
 		if (!ret)
 			__get_cpu_var(hash_stats).global_accept++;
-		else {
-			if (ret != -EAGAIN)
-				__get_cpu_var(hash_stats).global_accept_failed++;
-			else
-				__get_cpu_var(hash_stats).global_accept_again++;
-		}
+		//else {
+		//	if (ret != -EAGAIN)
+		//		__get_cpu_var(hash_stats).global_accept_failed++;
+		//	else
+		//		__get_cpu_var(hash_stats).global_accept_again++;
+		//}
 		return ret;
 	}
 	return -EAGAIN;
