@@ -1,3 +1,9 @@
+/*
+ * libsocket.h
+ *
+ * Copyright (C) SINA Corporation
+ */
+
 #ifndef _LINUX_FASTSOCKET_LIB_H
 #define _LINUX_FASTSOCKET_LIB_H
 

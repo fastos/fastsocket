@@ -36,7 +36,7 @@ scalability, Fastsocket
   * benefits applications without introducing modifications to the applications, and
   * keeps all kinds of monitoring/tuning tools available out-of-the-box.
 
-Fastsocket is implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6) 
+Fastsocket is released under GPLv2 and currently implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6) 
 of CentOS-6.5.
 
 According to our evaluations, Fastsocket increases throughput of Nginx and

@@ -1,7 +1,12 @@
 /*
+ * server.c
+ *
+ * Copyright (C) SINA Corporation
+ *
  * Simple HTTP server that can be used in web server mode
  * and proxy server mode.
- * It is used to test short TCP connection performance.
+ * It is used to test TCP netwotk stack performance.
+ *
  */
 
 #ifndef _GNU_SOURCE

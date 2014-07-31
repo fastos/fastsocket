@@ -1,3 +1,9 @@
+/*
+ * libsocket.c
+ *
+ * Copyright (C) SINA Corporation
+ */
+
 #include <stdlib.h>
 #include <stdio.h>
 #include <sys/types.h>
