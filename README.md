@@ -58,7 +58,7 @@ the [Evaluation](#online-evaluation).
 - Fastsocket is started and mainly developed by Xiaofeng Lin from the OS team of SINA.COM.
 - OS center of Tsinghua is cooperating closely with SINA.COM to further enhance Fastsocket.
 - Fastsocket is also supported by Intel with extensive assistance.
-- Zeuux Commutiy is providing open source consulting for Fastsocket.
+- Zeuux Community is providing open source consulting for Fastsocket.
 
 ## INSTALLATION ##
 
