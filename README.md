@@ -17,6 +17,7 @@
   * [Nginx] (#nginx)
   * [Haproxy] (#haproxy)
   * [Online Evaluation](#online-evaluation)
+* [Next](#next)
 
 ## INTRODUCTION ##
 
@@ -25,16 +26,11 @@ scalable TCP network stack is performance-critical. However, stock Linux
 kernel dose not scale well when CPU core number is above 4. It is even worse 
 that the throughput could collapse when there are more than 12 CPU cores.
 
-Fastsocket is a scalable TCP socket implementation and achieves a straight 
-linear performance growth when scaling up to 24 CPU cores. To realize the
-scalability, Fastsocket 
-
-  * removes socket performance bottlenecks in the VFS,
-  * achieves locality of both passive and active connections,
-  * converts both listen and established socket tables into per-cpu data
-    structures,
-  * benefits applications without introducing modifications to the applications, and
-  * keeps all kinds of monitoring/tuning tools available out-of-the-box.
+Fastsocket is a scalable kernel TCP socket implementation and achieves a straight 
+linear performance growth when scaling up to 24 CPU cores. 
+Meanwhile, The underlying kernel optimization of Fastsocket is transparent for 
+socket applications, which means existing applications can take advantage of 
+Fastsocket without changing their codes.
 
 Fastsocket is released under GPLv2 and currently implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6) 
 of CentOS-6.5.
@@ -277,3 +273,22 @@ Moreover, since the server is an old 8-core machine, we expect Fastsocket would
 make more performance improvement when Fastsocket is deployed on a machine with 
 more CPU cores.
 
+## NEXT ##
+
+We are now improving network stack efficiency in the case of long TCP connection.
+Three more features are introduced:
+
+- Direct-TCP: Skip the route process when receiving packets if these packets belong
+to upper TCP sockets.
+- Skb-Pool: Get skb from per-core pre-allocated skb pool instead of kernel slab.
+- Receive-CPU-Select: Steer a packet to a CPU core where application is waiting for it. 
+The idea is similar with RFS from Google, however, it is lighter and more accurate.
+
+We evaluated our new work on redis which is a typical and popular key-value cache application.
+
+The 8-redis-instances test shows:
+
+- With commodity NIC supporting RSS, Fastsocket improves the throughput by more than 20%.
+- WIth advanced NIC supporting Flow-Director(Intel 82599), a 40% improvement can be reached.
+
+These codes will be released soon when they are proved stable.
