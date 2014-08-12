@@ -90,21 +90,12 @@ After that, libfsocket.so is created in the same directory.
 
 ### INSTALL FROM YUM ###
 
-For those who do not want to bother with the source codes, RPM packages for
-x86_64 are provided at http://114.215.138.161/download/ 
+For those who do not want to bother with the source codes, we provide a quick 
+yum installing for redhat Linux distributions on x86_64 machines.
 
-Install the RPM packages:
+	yum -c http://114.215.138.161/fastsocket/yum.conf groupinstall fastsocket
 
-	[root@localhost ~]# rpm --force -ivh \
-	> kernel-2.6.32-431.17.1.el6.x86_64.rpm \
-	> kernel-firmware-2.6.32-431.17.1.el6.x86_64.rpm \
-	> kernel-devel-2.6.32-431.17.1.el6.x86_64.rpm
-
-The library RPM package for x86_64 is also available at http://114.215.138.161/download/
-
-Install the RPM package:
-
-	[root@localhost ~]# rpm -ivh libfsocket-1.x.x.x86_64.rpm
+Note: the command will override previously installed kernel packages. So be careful.
 
 After that, libfsocket.so should be located in /usr/lib64.
 
