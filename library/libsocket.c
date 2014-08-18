@@ -295,20 +295,20 @@ int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
 			}
 		}
 
-		arg.op.epoll_op.epoll_fd = efd;
-		arg.op.epoll_op.ep_ctl_cmd = cmd;
-		arg.op.epoll_op.ev = ev;
+		//arg.op.epoll_op.epoll_fd = efd;
+		//arg.op.epoll_op.ep_ctl_cmd = cmd;
+		//arg.op.epoll_op.ev = ev;
 
-		ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_EPOLL_CTL, &arg);
-		if (ret < 0) {
-			FSOCKET_ERR("FSOCKET: epoll_ctl failed!\n");
-			return ret;
-		}
-	} else {
-		if (!real_epoll_ctl)
-			real_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
-		ret = real_epoll_ctl(efd, cmd, fd, ev);
+		//ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_EPOLL_CTL, &arg);
+		//if (ret < 0) {
+		//	FSOCKET_ERR("FSOCKET: epoll_ctl failed!\n");
+		//	return ret;
+		//}
 	}
+
+	if (!real_epoll_ctl)
+		real_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
+	ret = real_epoll_ctl(efd, cmd, fd, ev);
 
 	return ret;
 }

@@ -1667,7 +1667,7 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 {
 	int error;
 	int full_check = 0;
-	struct file *file, *tfile;
+	struct file *file, *tfile, *sfile;
 	struct eventpoll *ep;
 	struct epitem *epi;
 	struct epoll_event epds;
@@ -1759,7 +1759,9 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 	if (tfile->f_mode & FMODE_BIND_EPI)
 		epi = tfile->f_epi;
 	else
-	epi = ep_find(ep, tfile, fd);
+		epi = ep_find(ep, tfile, fd);
+
+	sfile = tfile->sub_file;
 
 	error = -EINVAL;
 	switch (op) {
@@ -1767,20 +1769,66 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 		if (!epi) {
 			epds.events |= POLLERR | POLLHUP;
 			error = ep_insert(ep, &epds, tfile, fd, full_check);
+			/* Take care of spawned local listen socket */
+			if (sfile && !error) {
+				error = ep_insert(ep, &epds, sfile, fd, full_check);
+				if (error) {
+					/* Rollback if ep_insert spawned local listen socket failed */
+					if (sfile->f_mode & FMODE_BIND_EPI)
+						epi = tfile->f_epi;
+					else
+						epi = ep_find(ep, tfile, fd);
+
+					WARN_ON(!epi);
+
+					if (!epi)
+						ep_remove(ep, epi);
+				}
+			}
 		} else
 			error = -EEXIST;
 		clear_tfile_check_list();
 		break;
 	case EPOLL_CTL_DEL:
-		if (epi)
+		if (epi) {
 			error = ep_remove(ep, epi);
-		else
+			/* Take care of spawned local listen socket */
+			if (sfile && !error) {
+				struct epitem *sepi;
+
+				if (sfile->f_mode & FMODE_BIND_EPI)
+					sepi = sfile->f_epi;
+				else
+					sepi = ep_find(ep, sfile, fd);
+
+				WARN_ON(!sepi);
+
+				if (sepi)
+					ep_remove(ep, sepi);
+					/* ep_remove would not fail */
+			}
+		} else
 			error = -ENOENT;
 		break;
 	case EPOLL_CTL_MOD:
 		if (epi) {
 			epds.events |= POLLERR | POLLHUP;
 			error = ep_modify(ep, epi, &epds);
+			/* Take care of spawned local listen socket */
+			if (sfile && !error) {
+				struct epitem *sepi;
+
+				if (sfile->f_mode & FMODE_BIND_EPI)
+					sepi = sfile->f_epi;
+				else
+					sepi = ep_find(ep, sfile, fd);
+
+				WARN_ON(!sepi);
+
+				if (sepi)
+					ep_modify(ep, sepi, &epds);
+					/* ep_modify would not fail */
+			}
 		} else
 			error = -ENOENT;
 		break;

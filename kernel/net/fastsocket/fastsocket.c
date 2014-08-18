@@ -795,6 +795,7 @@ out:
 	return err;
 }
 
+#if 0
 extern int is_file_epoll_export(struct file *f);
 extern void clear_tfile_check_list(void);
 extern int ep_loop_check(struct eventpoll *ep, struct file *file);
@@ -950,6 +951,7 @@ error_loop_check:
 
 	return error;
 }
+#endif
 
 cpumask_t spawn_cpuset;
 int spawn_cpu;
@@ -982,7 +984,7 @@ static int fsocket_process_affinity_check(int rcpu)
 
 	if (enable_listen_spawn == DISABLE_LISTEN_SPAWN) {
 		EPRINTK_LIMIT(ERR, "Module para disable listen-spawn feature\n");
-		return -EINVAL;
+		return -EPERM;
 	}
 
 	if ((rcpu >= 0) && (rcpu > num_active_cpus())) {
@@ -1597,6 +1599,7 @@ static int fastsocket_shutdown_listen(struct fsocket_ioctl_arg * u_arg)
 	return ret;
 }
 
+#if 0
 static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 {
 	struct fsocket_ioctl_arg arg;
@@ -1650,6 +1653,7 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 
 	return ret;
 }
+#endif
 
 static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
@@ -1666,8 +1670,8 @@ static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long 
 		return fastsocket_close((struct fsocket_ioctl_arg *) arg);
 	case FSOCKET_IOC_SHUTDOWN_LISTEN:
 		return fastsocket_shutdown_listen((struct fsocket_ioctl_arg *) arg);
-	case FSOCKET_IOC_EPOLL_CTL:
-		return fastsocket_epoll_ctl((struct fsocket_ioctl_arg *)arg);
+	//case FSOCKET_IOC_EPOLL_CTL:
+	//	return fastsocket_epoll_ctl((struct fsocket_ioctl_arg *)arg);
 	default:
 		EPRINTK_LIMIT(ERR, "ioctl [%d] operation not support\n", cmd);
 		break;
