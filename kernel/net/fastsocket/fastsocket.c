@@ -610,6 +610,11 @@ static void fsocket_init_socket(struct socket *sock)
 		sock_set_flag(sock->sk, SOCK_DIRECT_TCP);
 		FPRINTK("Socket 0x%p is set with DIRECT_TCP\n", sock->sk);
 	}
+	if (enable_receive_cpu_selection) {
+		sock_set_flag(sock->sk, SOCK_AFFINITY);
+		sock->sk->sk_affinity = smp_processor_id();
+		FPRINTK("Socket 0x%p is set with RCS\n", sock->sk);
+	}
 }
 
 static void fsocket_copy_socket(struct socket *oldsock, struct socket *newsock)
@@ -682,7 +687,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		goto out;
 	}
 
-	sock->sk->sk_cpu_affinity = -1;
+	sock->sk->sk_local = -1;
 
 	fsocket_copy_socket(oldsock, sock);
 
@@ -1064,14 +1069,14 @@ static int fsocket_process_affinity_check(int rcpu)
 static void fsocket_sk_affinity_set(struct socket *sock, int cpu)
 {
 	sock_set_flag(sock->sk, SOCK_LOCAL);
-	sock->sk->sk_cpu_affinity = cpu;
+	sock->sk->sk_local = cpu;
 
 	DPRINTK(DEBUG, "Bind this listen socket to CPU %d", cpu);
 }
 
 static void fsocket_sk_affinity_release(struct socket *sock)
 {
-	sock->sk->sk_cpu_affinity = -1;
+	sock->sk->sk_local = -1;
 }
 
 static void fsocket_filp_close_spawn(int fd)
@@ -1259,7 +1264,7 @@ static inline int fsocket_local_accept(struct socket *sock, struct socket *newso
 
 	ret = sock->ops->accept(sock, newsock, flags);
 	if (!ret) {
-		if (sock->sk->sk_cpu_affinity == smp_processor_id())
+		if (sock->sk->sk_local == smp_processor_id())
 			__get_cpu_var(hash_stats).local_accept++;
 		else
 			__get_cpu_var(hash_stats).remote_accept++;

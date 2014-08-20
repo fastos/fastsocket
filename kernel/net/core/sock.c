@@ -1142,7 +1142,6 @@ struct sock *sk_alloc(struct net *net, int family, gfp_t priority,
 	sk = sk_prot_alloc(prot, priority | __GFP_ZERO, family);
 	if (sk) {
 		sk->sk_family = family;
-		sk->sk_bound_cpu = -1;
 		/*
 		 * See comment in struct sock definition to understand
 		 * why we need sk_prot_creator -acme
@@ -1301,7 +1300,6 @@ struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
 		sk_refcnt_debug_inc(newsk);
 		sk_set_socket(newsk, NULL);
 		newsk->sk_sleep	 = NULL;
-		newsk->sk_bound_cpu = -1;
 
 		if (newsk->sk_prot->sockets_allocated)
 			percpu_counter_inc(newsk->sk_prot->sockets_allocated);

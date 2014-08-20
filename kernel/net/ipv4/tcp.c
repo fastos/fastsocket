@@ -379,8 +379,10 @@ unsigned int tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
 	struct sock *sk = sock->sk;
 	struct tcp_sock *tp = tcp_sk(sk);
 
-	if (enable_receive_cpu_selection) inet_rcs_record_cpu(sk);
-	else inet_rps_record_flow(sk);
+	if (enable_receive_cpu_selection)
+		inet_rcs_record_cpu(sk);
+	else 
+		inet_rps_record_flow(sk);
 
 	sock_poll_wait(file, sk->sk_sleep, wait);
 	if (sk->sk_state == TCP_LISTEN)

@@ -674,8 +674,11 @@ int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 
 	lock_sock(sk2);
 
-	if (enable_receive_cpu_selection) inet_rcs_record_cpu(sk2);
-	else inet_rps_record_flow(sk2);
+	if (enable_receive_cpu_selection)
+		inet_rcs_record_cpu(sk2);
+	else 
+		inet_rps_record_flow(sk2);
+
 	WARN_ON(!((1 << sk2->sk_state) &
 		  (TCPF_ESTABLISHED | TCPF_CLOSE_WAIT | TCPF_CLOSE)));
 
@@ -726,8 +729,10 @@ int inet_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 {
 	struct sock *sk = sock->sk;
 
-	if (enable_receive_cpu_selection) inet_rcs_record_cpu(sk);
-	else inet_rps_record_flow(sk);
+	if (enable_receive_cpu_selection)
+		inet_rcs_record_cpu(sk);
+	else 
+		inet_rps_record_flow(sk);
 
 	/* We may need to bind the socket. */
 	if (!inet_sk(sk)->num && inet_autobind(sk))
@@ -742,8 +747,10 @@ static ssize_t inet_sendpage(struct socket *sock, struct page *page, int offset,
 {
 	struct sock *sk = sock->sk;
 
-	if (enable_receive_cpu_selection) inet_rcs_record_cpu(sk);
-	else inet_rps_record_flow(sk);
+	if (enable_receive_cpu_selection)
+		inet_rcs_record_cpu(sk);
+	else 
+		inet_rps_record_flow(sk);
 
 	/* We may need to bind the socket. */
 	if (!inet_sk(sk)->num && inet_autobind(sk))
@@ -761,8 +768,10 @@ int inet_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	int addr_len = 0;
 	int err;
 
-	if (enable_receive_cpu_selection) inet_rcs_record_cpu(sk);
-	else inet_rps_record_flow(sk);
+	if (enable_receive_cpu_selection)
+		inet_rcs_record_cpu(sk);
+	else 
+		inet_rps_record_flow(sk);
 
 	err = sk->sk_prot->recvmsg(iocb, sk, msg, size, flags & MSG_DONTWAIT,
 				   flags & ~MSG_DONTWAIT, &addr_len);

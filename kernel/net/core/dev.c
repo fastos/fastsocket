@@ -3580,13 +3580,15 @@ static int get_rcs_cpu(struct sk_buff *skb) {
 			sk = __inet_lookup(&init_net, &tcp_hashinfo, iph->saddr, th->source,
 					iph->daddr, th->dest, skb->dev->ifindex);
 
-			if (sk && sk->sk_bound_cpu != -1) {
+			if (sk && (sk->sk_state != TCP_TIME_WAIT) && 
+					sock_flag(sk, SOCK_DIRECT_TCP) && sk->sk_affinity >= 0) {
+
 				stat->rcs_hit++;
-				if (sk->sk_bound_cpu != cur_cpu && sk->sk_state != TCP_TIME_WAIT) {
-					return sk->sk_bound_cpu;
-				} else {
+
+				if (sk->sk_affinity != cur_cpu)
+					return sk->sk_affinity;
+				else
 					sock_put(sk);
-				}
 			}
 		}
 	}

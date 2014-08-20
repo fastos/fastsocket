@@ -560,7 +560,7 @@ static void __inet_hash(struct sock *sk)
 		//		break;
 		//}
 		
-		cpu = sk->sk_cpu_affinity;		
+		cpu = sk->sk_local;
 
 		ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);
 		ilb = &ilt->listening_hash[hash];
@@ -609,7 +609,7 @@ void inet_unhash(struct sock *sk)
 			//		break;
 			//}
 			
-			cpu = sk->sk_cpu_affinity;
+			cpu = sk->sk_local;
 			ilt = per_cpu_ptr(hashinfo->local_listening_hash, cpu);
 			ilb = &ilt->listening_hash[hash];
 

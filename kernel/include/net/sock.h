@@ -139,7 +139,8 @@ struct sock_common {
 #else
 	unsigned char		skc_reuse;
 #endif
-	int 			skc_cpu_affinity;
+	short 			skc_local;
+	short 			skc_affinity;
 	int			skc_bound_dev_if;
 	struct hlist_node	skc_bind_node;
 	struct proto		*skc_prot;
@@ -230,7 +231,8 @@ struct sock {
 #define sk_reuse		__sk_common.skc_reuse
 #define sk_reuseport		__sk_common.skc_reuseport
 #define sk_reuseport		__sk_common.skc_reuseport
-#define sk_cpu_affinity		__sk_common.skc_cpu_affinity
+#define sk_local		__sk_common.skc_local
+#define sk_affinity		__sk_common.skc_affinity
 #define sk_bound_dev_if		__sk_common.skc_bound_dev_if
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_prot			__sk_common.skc_prot
@@ -305,8 +307,6 @@ struct sock {
 #endif
 	__u32			sk_mark;
 	u32			sk_classid;
-	unsigned long		sk_cpumask;
-	long			sk_bound_cpu;
 	void			(*sk_state_change)(struct sock *sk);
 	void			(*sk_data_ready)(struct sock *sk, int bytes);
 	void			(*sk_write_space)(struct sock *sk);
@@ -590,6 +590,7 @@ enum sock_flags {
 	SOCK_SKB_POOL, /* use skb pool when xmit skb from the socket */
 	SOCK_PASSIVE_OPEN,      /* Passive connection socket */
 	SOCK_ACTIVE_OPEN,       /* Active connection socket */
+	SOCK_AFFINITY,		/* steer skb to CPU core on which user will process */
 	SOCK_RELAX = 31, /* kABI: bind conflict relax bit */
 };
 
