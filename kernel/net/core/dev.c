@@ -3414,7 +3414,9 @@ out:
 	return ret;
 }
 
-static DEFINE_PER_CPU(struct netif_deliver_stats, deliver_stats);
+DEFINE_PER_CPU(struct netif_deliver_stats, deliver_stats);
+EXPORT_PER_CPU_SYMBOL(deliver_stats);
+
 
 static int netif_pass_cpu(unsigned short dport)
 {
@@ -3604,11 +3606,96 @@ static int get_rcs_cpu(struct sk_buff *skb) {
 int enable_receive_cpu_selection = 0;
 EXPORT_SYMBOL(enable_receive_cpu_selection);
 
+int enable_rps_framework = 0;
+EXPORT_SYMBOL(enable_rps_framework);
+
+static DEFINE_SPINLOCK(rps_table_lock);
+static struct list_head rps_table[IPPROTO_MAX]__read_mostly;
+
+static void init_rps_framework(void)
+{
+	int i;
+
+	for (i = 0; i < IPPROTO_MAX; i++)
+		INIT_LIST_HEAD(&rps_table[i]);
+}
+
+int rps_register(struct netif_rps_entry *re)
+{
+	int ret = 0;
+
+	if (re->proto >= IPPROTO_MAX)
+		return -EINVAL;
+
+	if (re->rps_init) {
+		ret = re->rps_init();
+		if (ret < 0)
+			return ret;
+	}
+
+	spin_lock(&rps_table_lock);
+
+	if (re->flags == RPS_CONTINUE)
+		list_add_rcu(&re->list, &rps_table[re->proto]);
+	else if (re->flags == RPS_STOP)
+		list_add_tail_rcu(&re->list, &rps_table[re->proto]);
+
+	spin_unlock(&rps_table_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL(rps_register);
+
+int rps_unregister(struct netif_rps_entry *re)
+{
+	spin_lock(&rps_table_lock);
+	list_del_rcu(&re->list);
+	spin_unlock(&rps_table_lock);
+
+	if (re->rps_uninit)
+		re->rps_uninit();
+
+	return 0;
+}
+EXPORT_SYMBOL(rps_unregister);
+
+static int netif_rps_process(struct sk_buff *skb)
+{
+	int ret;
+
+	/* Only support IPV4 */
+	if (skb->protocol != htons(ETH_P_IP)) {
+		ret = -1;
+		goto out;
+	}
+
+	if (pskb_may_pull(skb, sizeof(struct iphdr))) {
+		struct iphdr *iph = (struct iphdr *)skb->data;
+		u8 ip_proto = iph->protocol;
+		struct netif_rps_entry *p;
+
+		list_for_each_entry_rcu(p, &rps_table[ip_proto], list) {
+			//if (p->proto != ip_proto) {
+			//	ret = -1;
+			//	goto out;
+			//}
+			ret = p->rps_process(skb);
+			/* If there's a match, rps framework won't check rest entries in the list. */
+			if (ret >= 0)
+				goto out;
+		}
+	}
+
+out:
+	return ret;
+}
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
 	int cpu, ret;
 
+	if (enable_rps_framework)
+		cpu = netif_rps_process(skb);
 
 	if (enable_direct_tcp)
 		netif_direct_tcp(skb);
@@ -7357,6 +7444,8 @@ static int __init net_dev_init(void)
 
 	if (register_pernet_subsys(&netdev_net_ops))
 		goto out;
+
+	init_rps_framework();
 
 	/*
 	 *	Initialise the packet receive queues.

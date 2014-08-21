@@ -31,6 +31,7 @@
 #include <linux/mutex.h>
 #include <linux/sched.h>
 #include <linux/fsnotify.h>
+#include <linux/netdevice.h>
 
 #include "fastsocket.h"
 
@@ -46,6 +47,7 @@ extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
 extern int enable_direct_tcp;
 extern int enable_skb_pool;
+extern int enable_rps_framework;
 extern int enable_receive_cpu_selection;
 
 module_param(enable_fastsocket_debug,int, 0);
@@ -1752,6 +1754,58 @@ static void init_once(void *foo)
 	inode_init_once(&ei->vfs_inode);
 }
 
+DECLARE_PER_CPU(struct netif_deliver_stats, deliver_stats);
+
+static int process_rcs_rfd(struct sk_buff *skb)
+{
+	struct iphdr *iph = (struct iphdr *)skb->data;
+	int iphl = iph->ihl;
+	struct netif_deliver_stats *stat;
+
+	if (pskb_may_pull(skb, (iphl * 4) + sizeof(struct tcphdr))) {
+		struct sock *sk;
+		struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
+		int cur_cpu = smp_processor_id();
+
+		if (!skb->peek_sk) {
+			sk = __inet_lookup(&init_net, &tcp_hashinfo, iph->saddr, th->source, iph->daddr, th->dest, skb->dev->ifindex);;
+			skb->peek_sk = sk;
+		} else
+			sk = skb->peek_sk;
+
+		stat = &get_cpu_var(deliver_stats);
+
+		if (likely(sk)) {
+			if ((sk->sk_state != TCP_TIME_WAIT) && 
+					sock_flag(sk, SOCK_AFFINITY) && sk->sk_affinity >= 0) {
+				stat->steer++;
+
+				if (sk->sk_affinity != cur_cpu) {
+					stat->steer_done++;
+					return sk->sk_affinity;
+				} else {
+					stat->steer_save++;
+					return -1;
+				}
+			} else {
+				stat->pass++;
+				return -1;
+			}
+		}
+	}
+
+	return -1;
+}
+
+static struct netif_rps_entry rcs_rps_entry = {
+	.proto		= IPPROTO_TCP,
+	.flags		= RPS_STOP,
+	.rps_process	= process_rcs_rfd,
+	.rps_init	= NULL,
+	.rps_uninit	= NULL,
+	.list		= LIST_HEAD_INIT(rcs_rps_entry.list),
+};
+
 static int __init  fastsocket_init(void)
 {
 	int ret = 0;
@@ -1802,8 +1856,12 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Direct TCP\n");
 	if (enable_skb_pool)
 		printk(KERN_INFO "Fastsocket: Enable Skb Pool[Mode-%d]\n", enable_skb_pool);
-	if (enable_receive_cpu_selection)
+	if (enable_receive_cpu_selection) {
+		enable_rps_framework = 1;
+		rps_register(&rcs_rps_entry);
 		printk(KERN_INFO "Fastsocket: Enable Receive CPU Selection\n");
+	}
+
 	return ret;
 }
 
@@ -1826,13 +1884,13 @@ static void __exit fastsocket_exit(void)
 		enable_direct_tcp = 0;
 		printk(KERN_INFO "Fastsocket: Disable Direct TCP\n");
 	}
-
 	if (enable_skb_pool) {
 		enable_skb_pool = 0;
 		printk(KERN_INFO "Fastsocket: Disable Skb Pool\n");
 	}
-
 	if (enable_receive_cpu_selection) {
+		enable_rps_framework = 0;
+		rps_unregister(&rcs_rps_entry);
 		enable_receive_cpu_selection = 0;
 		printk(KERN_INFO "Fastsocket: Disable CPU Selection\n");
 	}
