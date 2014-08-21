@@ -35,7 +35,6 @@
 
 #include "fastsocket.h"
 
-
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
 MODULE_VERSION("1.0.0");
@@ -610,12 +609,12 @@ static void fsocket_init_socket(struct socket *sock)
 {
 	if (enable_direct_tcp) {
 		sock_set_flag(sock->sk, SOCK_DIRECT_TCP);
-		FPRINTK("Socket 0x%p is set with DIRECT_TCP\n", sock->sk);
+		DPRINTK(DEBUG, "Socket 0x%p is set with DIRECT_TCP\n", sock->sk);
 	}
 	if (enable_receive_cpu_selection) {
 		sock_set_flag(sock->sk, SOCK_AFFINITY);
 		sock->sk->sk_affinity = smp_processor_id();
-		FPRINTK("Socket 0x%p is set with RCS\n", sock->sk);
+		DPRINTK(DEBUG, "Socket 0x%p is set with RCS\n", sock->sk);
 	}
 }
 
@@ -1756,7 +1755,7 @@ static void init_once(void *foo)
 
 DECLARE_PER_CPU(struct netif_deliver_stats, deliver_stats);
 
-static int process_rcs_rfd(struct sk_buff *skb)
+static int process_rcs_rps(struct sk_buff *skb)
 {
 	struct iphdr *iph = (struct iphdr *)skb->data;
 	int iphl = iph->ihl;
@@ -1800,10 +1799,56 @@ static int process_rcs_rfd(struct sk_buff *skb)
 static struct netif_rps_entry rcs_rps_entry = {
 	.proto		= IPPROTO_TCP,
 	.flags		= RPS_STOP,
-	.rps_process	= process_rcs_rfd,
+	.rps_process	= process_rcs_rps,
 	.rps_init	= NULL,
 	.rps_uninit	= NULL,
 	.list		= LIST_HEAD_INIT(rcs_rps_entry.list),
+};
+
+static int process_direct_tcp_rps(struct sk_buff *skb)
+{
+	struct iphdr *iph = (struct iphdr *)skb->data;
+	int iphl = iph->ihl;
+
+	if (pskb_may_pull(skb, (iphl * 4) + sizeof(struct tcphdr))) {
+		struct sock *sk;
+		struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
+
+		if (!skb->peek_sk) {
+			sk = __inet_lookup(&init_net, &tcp_hashinfo, iph->saddr, th->source, iph->daddr, th->dest, skb->dev->ifindex);;
+			skb->peek_sk = sk;
+		} else
+			sk = skb->peek_sk;
+
+		if (likely(sk)) {
+			if ((sk->sk_state != TCP_TIME_WAIT) && sock_flag(sk, SOCK_DIRECT_TCP)) {
+				//DPRINTK(DEBUG, "Skb 0x%p[:%u] hit DIRECT_TCP socket 0x%p[:%u]\n", skb, ntohs(th->dest), sk, inet_sk(sk)->num);
+				if(sk->sk_rcv_dst) {
+					skb_dst_set(skb, sk->sk_rcv_dst);
+					skb->sock_dst = sk->sk_rcv_dst;
+					//DPRINTK(DEBUG, "Direct TCP socket 0x%p has dst record 0x%p[%u]\n", sk, sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt));a
+				}
+				//} else {
+				//	DPRINTK(DEBUG, "Direct TCP socket 0x%p has not dst record\n", sk);
+				//}
+
+			//} else {
+			//	if (ntohs(th->dest) != 22)
+			//		DPRINTK(DEBUG, "Skb 0x%p[:%u] hit common socket 0x%p[:%u]\n", skb,ntohs(th->dest), sk, inet_sk(sk)->num);
+			}
+		}
+	}
+
+	return -1;
+}
+
+static struct netif_rps_entry direct_tcp_rps_entry = {
+	.proto		= IPPROTO_TCP,
+	.flags		= RPS_CONTINUE,
+	.rps_process	= process_direct_tcp_rps,
+	.rps_init	= NULL,
+	.rps_uninit	= NULL,
+	.list		= LIST_HEAD_INIT(direct_tcp_rps_entry.list),
 };
 
 static int __init  fastsocket_init(void)
@@ -1815,7 +1860,6 @@ static int __init  fastsocket_init(void)
 			num_present_cpus(), num_active_cpus());
 
 	ret = misc_register(&fastsocket_dev);
-	printk(KERN_INFO "Fastsocket: Load Module\n");
 
 	if (ret < 0) {
 		EPRINTK_LIMIT(ERR, "Register fastsocket channel device failed\n");
@@ -1852,8 +1896,11 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Recieve Flow Deliver\n");
 	if (enable_fast_epoll)
 		printk(KERN_INFO "Fastsocket: Enable Fast Epoll\n");
-	if (enable_direct_tcp)
+	if (enable_direct_tcp) {
+		enable_rps_framework = 1;
+		rps_register(&direct_tcp_rps_entry);
 		printk(KERN_INFO "Fastsocket: Enable Direct TCP\n");
+	}
 	if (enable_skb_pool)
 		printk(KERN_INFO "Fastsocket: Enable Skb Pool[Mode-%d]\n", enable_skb_pool);
 	if (enable_receive_cpu_selection) {
@@ -1881,6 +1928,8 @@ static void __exit fastsocket_exit(void)
 		printk(KERN_INFO "Fastsocket: Disable Recieve Flow Deliver\n");
 	}
 	if (enable_direct_tcp) {
+		enable_rps_framework = 0;
+		rps_unregister(&direct_tcp_rps_entry);
 		enable_direct_tcp = 0;
 		printk(KERN_INFO "Fastsocket: Disable Direct TCP\n");
 	}

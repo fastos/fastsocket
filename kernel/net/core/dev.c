@@ -3418,6 +3418,7 @@ DEFINE_PER_CPU(struct netif_deliver_stats, deliver_stats);
 EXPORT_PER_CPU_SYMBOL(deliver_stats);
 
 
+#if 0
 static int netif_pass_cpu(unsigned short dport)
 {
 	__get_cpu_var(deliver_stats).pass++;
@@ -3495,26 +3496,12 @@ static int get_rfd_cpu(struct sk_buff *skb)
 
 	return -1;
 }
-
-/**
- *	netif_receive_skb - process receive buffer from network
- *	@skb: buffer to process
- *
- *	netif_receive_skb() is the main receive data processing function.
- *	It always succeeds. The buffer may be dropped during processing
- *	for congestion control or by the protocol layers.
- *
- *	This function may only be called from softirq context and interrupts
- *	should be enabled.
- *
- *	Return values (usually ignored):
- *	NET_RX_SUCCESS: no congestion
- *	NET_RX_DROP: packet was dropped
- */
+#endif
 
 int enable_receive_flow_deliver = 0;
 EXPORT_SYMBOL(enable_receive_flow_deliver);
 
+#if 0
 static void netif_direct_tcp(struct sk_buff *skb)
 {
 	if (skb->protocol != htons(ETH_P_IP))
@@ -3555,10 +3542,11 @@ static void netif_direct_tcp(struct sk_buff *skb)
 		}
 	}
 }
-
+#endif
 int enable_direct_tcp = 0;
 EXPORT_SYMBOL(enable_direct_tcp);
 
+#if 0
 static int get_rcs_cpu(struct sk_buff *skb) {
 	struct rcs_lookup_stat *stat;
 	int cur_cpu = smp_processor_id();
@@ -3603,6 +3591,8 @@ static int get_rcs_cpu(struct sk_buff *skb) {
 
 	return -1;
 }
+#endif
+
 int enable_receive_cpu_selection = 0;
 EXPORT_SYMBOL(enable_receive_cpu_selection);
 
@@ -3635,8 +3625,10 @@ int rps_register(struct netif_rps_entry *re)
 
 	spin_lock(&rps_table_lock);
 
+	/* RPS_CONTINUE entries are in the head of the list */
 	if (re->flags == RPS_CONTINUE)
 		list_add_rcu(&re->list, &rps_table[re->proto]);
+	/* RPS_STOP entries are in the tail of the list */
 	else if (re->flags == RPS_STOP)
 		list_add_tail_rcu(&re->list, &rps_table[re->proto]);
 
@@ -3675,12 +3667,8 @@ static int netif_rps_process(struct sk_buff *skb)
 		struct netif_rps_entry *p;
 
 		list_for_each_entry_rcu(p, &rps_table[ip_proto], list) {
-			//if (p->proto != ip_proto) {
-			//	ret = -1;
-			//	goto out;
-			//}
 			ret = p->rps_process(skb);
-			/* If there's a match, rps framework won't check rest entries in the list. */
+			/* Loop will break after a RPS_STOP entry returns no less than 0 */
 			if (ret >= 0)
 				goto out;
 		}
@@ -3689,22 +3677,39 @@ static int netif_rps_process(struct sk_buff *skb)
 out:
 	return ret;
 }
+
+/**
+ *	netif_receive_skb - process receive buffer from network
+ *	@skb: buffer to process
+ *
+ *	netif_receive_skb() is the main receive data processing function.
+ *	It always succeeds. The buffer may be dropped during processing
+ *	for congestion control or by the protocol layers.
+ *
+ *	This function may only be called from softirq context and interrupts
+ *	should be enabled.
+ *
+ *	Return values (usually ignored):
+ *	NET_RX_SUCCESS: no congestion
+ *	NET_RX_DROP: packet was dropped
+ */
+
 int netif_receive_skb(struct sk_buff *skb)
 {
 	struct rps_dev_flow voidflow, *rflow = &voidflow;
-	int cpu, ret;
+	int cpu = -1, ret;
 
 	if (enable_rps_framework)
 		cpu = netif_rps_process(skb);
 
-	if (enable_direct_tcp)
-		netif_direct_tcp(skb);
-
-	if (enable_receive_flow_deliver)
-		cpu = get_rfd_cpu(skb);
-	else if (enable_receive_cpu_selection)
-		cpu = get_rcs_cpu(skb);
-	else
+	//if (enable_direct_tcp)
+	//	netif_direct_tcp(skb);
+	//if (enable_receive_flow_deliver)
+	//	cpu = get_rfd_cpu(skb);
+	//else if (enable_receive_cpu_selection)
+	//	cpu = get_rcs_cpu(skb);
+		
+	if (cpu == -1)
 		cpu = get_rps_cpu(skb->dev, skb, &rflow);
 
 	if (cpu >= 0)
