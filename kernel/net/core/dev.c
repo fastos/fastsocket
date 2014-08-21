@@ -3542,12 +3542,13 @@ static void netif_direct_tcp(struct sk_buff *skb)
 					} else {
 						FPRINTK("Direct TCP socket 0x%p has not dst record\n", sk);
 					}
-					skb->peek_sk = sk;
-					FPRINTK("Store socket 0x%p in skb 0x%p\n", sk, skb);
 				} else {
-					sock_put(sk);
+					//sock_put(sk);
 					FPRINTK("Skb 0x%p[:%u] hit common socket 0x%p[:%u]\n", skb,ntohs(th->dest), sk, inet_sk(sk)->num);
 				}
+
+				skb->peek_sk = sk;
+				FPRINTK("Store socket 0x%p in skb 0x%p\n", sk, skb);
 			}
 		}
 	}
@@ -3577,21 +3578,27 @@ static int get_rcs_cpu(struct sk_buff *skb) {
 			struct tcphdr *th = (struct tcphdr *)(skb->data + (iphl * 4));
 			struct sock *sk;
 
-			sk = __inet_lookup(&init_net, &tcp_hashinfo, iph->saddr, th->source,
-					iph->daddr, th->dest, skb->dev->ifindex);
+			if (skb->peek_sk)
+				sk = skb->peek_sk;
+			else {
+				sk = __inet_lookup(&init_net, &tcp_hashinfo, iph->saddr, th->source, 
+						iph->daddr, th->dest, skb->dev->ifindex);
+				skb->peek_sk = sk;
+			}
 
-			if (sk && (sk->sk_state != TCP_TIME_WAIT) && 
-					sock_flag(sk, SOCK_DIRECT_TCP) && sk->sk_affinity >= 0) {
+			if (sk) {
+				if ((sk->sk_state != TCP_TIME_WAIT) && 
+					sock_flag(sk, SOCK_AFFINITY) && sk->sk_affinity >= 0) {
 
 				stat->rcs_hit++;
 
 				if (sk->sk_affinity != cur_cpu)
 					return sk->sk_affinity;
-				else
-					sock_put(sk);
+				}
 			}
 		}
 	}
+
 	return -1;
 }
 int enable_receive_cpu_selection = 0;
