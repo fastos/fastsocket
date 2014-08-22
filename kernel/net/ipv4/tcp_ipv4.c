@@ -86,6 +86,8 @@ int sysctl_tcp_tw_reuse __read_mostly;
 int sysctl_tcp_low_latency __read_mostly;
 
 
+//#define FPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d][PID-%d] %s:%d\t" msg, smp_processor_id(), current->pid, __FUNCTION__, __LINE__, ## args);
+
 #ifdef CONFIG_TCP_MD5SIG
 static struct tcp_md5sig_key *tcp_v4_md5_do_lookup(struct sock *sk,
 						   __be32 addr);
@@ -1626,20 +1628,20 @@ process:
 		goto do_time_wait;
 
 	if (sock_flag(sk, SOCK_DIRECT_TCP)) {
-		FPRINTK("Skb 0x%p hit DIRECT_TCP socket 0x%p\n", skb, sk);
-		if (sk->sk_state != TCP_LISTEN) {
-			if (!sk->sk_rcv_dst) {
-				sk->sk_rcv_dst = skb_dst(skb);
-				dst_hold(sk->sk_rcv_dst);
-				FPRINTK("Record dst 0x%p[%u] on the direct TCP socket 0x%p\n", skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt), sk);
-			} else {
-				FPRINTK("Dst 0x%p[%u] is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
-			}
+		//FPRINTK("Skb 0x%p hit DIRECT_TCP socket 0x%p\n", skb, sk);
+		if (!sk->sk_rcv_dst) {
+			sk->sk_rcv_dst = skb_dst(skb);
+			dst_hold(sk->sk_rcv_dst);
+			//FPRINTK("Record dst 0x%p[%u] on the direct TCP socket 0x%p\n", skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt), sk);
 		} else {
-			FPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);
+			//FPRINTK("Dst 0x%p[%u] is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
 		}
+		//} else {
+		//	FPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);
+		//}
 	} else {
-		FPRINTK("Skb 0x%p hit common socket 0x%p\n", skb, sk);
+		//if (ntohs(th->dest) != 22)
+		//	FPRINTK("Skb 0x%p hit common socket 0x%p\n", skb, sk);
 	}
 
 	if (unlikely(iph->ttl < sk_get_min_ttl(sk))) {

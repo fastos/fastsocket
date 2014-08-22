@@ -1073,7 +1073,7 @@ static struct sock *sk_prot_alloc(struct proto *prot, gfp_t priority,
 		sk->sk_prot_creator = prot;
 		sk_tx_queue_clear(sk);
 		sk->sk_rcv_dst = NULL;
-		FPRINTK("Initiate dst on socket 0x%p[:%u]\n", sk, inet_sk(sk)->num);
+		//FPRINTK("Initiate dst on socket 0x%p[:%u]\n", sk, inet_sk(sk)->num);
 	}
 
 	return sk;
@@ -1195,7 +1195,7 @@ void sk_free(struct sock *sk)
 	 */
 	if (atomic_dec_and_test(&sk->sk_wmem_alloc))
 		__sk_free(sk);
-		FPRINTK("Release socket 0x%p[%u]\n", sk, atomic_read(&sk->sk_wmem_alloc));
+		//FPRINTK("Release socket 0x%p[%u]\n", sk, atomic_read(&sk->sk_wmem_alloc));
 }
 EXPORT_SYMBOL(sk_free);
 
@@ -1256,6 +1256,8 @@ struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
 				af_family_clock_key_strings[newsk->sk_family]);
 
 		newsk->sk_dst_cache	= NULL;
+		if (newsk->sk_rcv_dst)
+			dst_hold(newsk->sk_rcv_dst);
 		newsk->sk_wmem_queued	= 0;
 		newsk->sk_forward_alloc = 0;
 		newsk->sk_send_head	= NULL;

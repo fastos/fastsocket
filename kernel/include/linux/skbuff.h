@@ -33,7 +33,7 @@
 
 #include <linux/hardirq.h>
 //#define FPRINTK(msg, args...) printk(KERN_DEBUG "Fastsocket [CPU%d] %s:%d\t" msg, smp_processor_id(), __FUNCTION__, __LINE__, ## args);
-#define FPRINTK(msg, args...)
+//#define FPRINTK(msg, args...)
 
 /* Don't change this without changing skb_csum_unnecessary! */
 #define CHECKSUM_NONE 0
@@ -551,7 +551,7 @@ static inline struct sk_buff *alloc_skb(unsigned int size,
 		skb = __alloc_skb(size, priority, SLAB_SKB, -1);
 	}
 
-	FPRINTK("Allocate skb 0x%p\n", skb);
+	//FPRINTK("Allocate skb 0x%p\n", skb);
 
 	return skb;
 }
@@ -570,7 +570,7 @@ static inline struct sk_buff *alloc_skb_fclone(unsigned int size,
 		skb = __alloc_skb(size, priority, SLAB_SKB_CLONE, -1);
 	}
 
-	FPRINTK("Allocate clone skb 0x%p\n", skb);
+	//FPRINTK("Allocate clone skb 0x%p\n", skb);
 
 	return skb;
 }
