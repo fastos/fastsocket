@@ -365,7 +365,7 @@ static int retrans_to_secs(u8 retrans, int timeout, int rto_max)
 	return period;
 }
 
-extern int enable_receive_cpu_selection;
+//extern int enable_receive_cpu_selection;
 /*
  *	Wait for a TCP event.
  *
@@ -379,7 +379,8 @@ unsigned int tcp_poll(struct file *file, struct socket *sock, poll_table *wait)
 	struct sock *sk = sock->sk;
 	struct tcp_sock *tp = tcp_sk(sk);
 
-	if (enable_receive_cpu_selection)
+	//if (enable_receive_cpu_selection)
+	if (sock_flag(sk, SOCK_AFFINITY))
 		inet_rcs_record_cpu(sk);
 	else 
 		inet_rps_record_flow(sk);

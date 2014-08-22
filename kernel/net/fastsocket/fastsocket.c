@@ -44,10 +44,10 @@ static int enable_fastsocket_debug = 3;
 static int enable_listen_spawn = 2;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
-extern int enable_direct_tcp;
 extern int enable_skb_pool;
 extern int enable_rps_framework;
-extern int enable_receive_cpu_selection;
+int enable_receive_cpu_selection = 0;
+int enable_direct_tcp = 0;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);

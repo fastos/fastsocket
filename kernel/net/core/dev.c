@@ -3543,8 +3543,8 @@ static void netif_direct_tcp(struct sk_buff *skb)
 	}
 }
 #endif
-int enable_direct_tcp = 0;
-EXPORT_SYMBOL(enable_direct_tcp);
+//int enable_direct_tcp = 0;
+//EXPORT_SYMBOL(enable_direct_tcp);
 
 #if 0
 static int get_rcs_cpu(struct sk_buff *skb) {
@@ -3593,8 +3593,8 @@ static int get_rcs_cpu(struct sk_buff *skb) {
 }
 #endif
 
-int enable_receive_cpu_selection = 0;
-EXPORT_SYMBOL(enable_receive_cpu_selection);
+//int enable_receive_cpu_selection = 0;
+//EXPORT_SYMBOL(enable_receive_cpu_selection);
 
 int enable_rps_framework = 0;
 EXPORT_SYMBOL(enable_rps_framework);

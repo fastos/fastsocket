@@ -662,7 +662,7 @@ EXPORT_SYMBOL(inet_stream_connect);
  *	Accept a pending connection. The TCP layer now gives BSD semantics.
  */
 
-extern int enable_receive_cpu_selection;
+//extern int enable_receive_cpu_selection;
 int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 {
 	struct sock *sk1 = sock->sk;
@@ -674,7 +674,8 @@ int inet_accept(struct socket *sock, struct socket *newsock, int flags)
 
 	lock_sock(sk2);
 
-	if (enable_receive_cpu_selection)
+	//if (enable_receive_cpu_selection)
+	if (sock_flag(sk2, SOCK_AFFINITY))
 		inet_rcs_record_cpu(sk2);
 	else 
 		inet_rps_record_flow(sk2);
@@ -729,7 +730,8 @@ int inet_sendmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 {
 	struct sock *sk = sock->sk;
 
-	if (enable_receive_cpu_selection)
+	//if (enable_receive_cpu_selection)
+	if (sock_flag(sk, SOCK_AFFINITY))
 		inet_rcs_record_cpu(sk);
 	else 
 		inet_rps_record_flow(sk);
@@ -747,7 +749,8 @@ static ssize_t inet_sendpage(struct socket *sock, struct page *page, int offset,
 {
 	struct sock *sk = sock->sk;
 
-	if (enable_receive_cpu_selection)
+	//if (enable_receive_cpu_selection)
+	if (sock_flag(sk, SOCK_AFFINITY))
 		inet_rcs_record_cpu(sk);
 	else 
 		inet_rps_record_flow(sk);
@@ -768,7 +771,8 @@ int inet_recvmsg(struct kiocb *iocb, struct socket *sock, struct msghdr *msg,
 	int addr_len = 0;
 	int err;
 
-	if (enable_receive_cpu_selection)
+	//if (enable_receive_cpu_selection)
+	if (sock_flag(sk, SOCK_AFFINITY))
 		inet_rcs_record_cpu(sk);
 	else 
 		inet_rps_record_flow(sk);
