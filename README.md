@@ -6,7 +6,6 @@
 * [Participants](#participants)
 * [Installation](#installation)
   * [Install From Source](#install-from-source)
-  * [Install From Yum](#install-from-yum)
   * [Switch Kernel](#switch-kernel)
 * [System Configuration](#system-configuration)
 * [Usage](#usage)
@@ -32,10 +31,8 @@ Meanwhile, The underlying kernel optimization of Fastsocket is transparent for
 socket applications, which means existing applications can take advantage of 
 Fastsocket without changing their codes.
 
-Fastsocket is released under GPLv2 and currently implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6) 
-of CentOS-6.5.
-
-According to our evaluations, Fastsocket increases throughput of Nginx and
+Currently Fastsocket is implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6) 
+of CentOS-6.5. According to our evaluations, Fastsocket increases throughput of Nginx and
 Haproxy(measured by connections per second) by **290%** and **620%** on a 
 24-core machine, compared to the base CentOS-6.5 kernel.
 
@@ -46,8 +43,11 @@ Moreover, Fastsocket can further exploit more from the hardware:
 the throughput by **15%** if the server works as a proxy(like Haproxy).
 
 Fastsocket has already been deployed in the SINA production environment and is 
-used with Haproxy to provide HTTP load balance service. More details are in
+used with Haproxy to provide HTTP proxy service. More details are in
 the [Evaluation](#online-evaluation).
+
+Fastsocket is released under GPLv2 and we promise that we would never ask for any
+ payment to use our codes.
 
 ## PARTICIPANTS ##
 
@@ -73,7 +73,8 @@ Here is a brief introduction to the directories in the repository.
 * **demo** - source code of a demo server to demonstrate performance of Fastsocket
 
 The following commands will build and install the kernel after Fastsocket repository
-is downloaded from git.
+is downloaded from git. You can customize the config file if you are sure you will 
+not miss some important component.
 
 	[root@localhost ~]# cd fastsocket/kernel
 	[root@localhost kernel]# make defconfig
@@ -87,17 +88,6 @@ Enter the library directory and make the library:
 	[root@localhost library]# make
 
 After that, libfsocket.so is created in the same directory.
-
-### INSTALL FROM YUM ###
-
-For those who do not want to bother with the source codes, we provide a quick 
-yum installing for redhat Linux distributions on x86_64 machines.
-
-	yum -c http://114.215.138.161/fastsocket/yum.conf groupinstall fastsocket
-
-Note: the command will override previously installed kernel packages. So be careful.
-
-After that, libfsocket.so should be located in /usr/lib64.
 
 ### SWITCH KERNEL ###
 
@@ -274,12 +264,16 @@ to upper TCP sockets.
 - Skb-Pool: Get skb from per-core pre-allocated skb pool instead of kernel slab.
 - Receive-CPU-Select: Steer a packet to a CPU core where application is waiting for it. 
 The idea is similar with RFS from Google, however, it is lighter and more accurate.
+- RPS-Framework: We extend the idea of RPS that is to redispatch the receiving packets 
+before they entering the network stack. We build a framework where developers can 
+implement their own packets-redispatching rules in out-of-tree module and hook into 
+the RPS framework.
 
 We evaluated our new work on redis which is a typical and popular key-value cache application.
 
 The 8-redis-instances test shows:
 
 - With commodity NIC supporting RSS, Fastsocket improves the throughput by more than 20%.
-- WIth advanced NIC supporting Flow-Director(Intel 82599), a 40% improvement can be reached.
+- WIth advanced NIC supporting Flow-Director(Intel 82599), a 45% improvement can be reached.
 
 These codes will be released soon when they are proved stable.
