@@ -1629,16 +1629,17 @@ process:
 
 	if (sock_flag(sk, SOCK_DIRECT_TCP)) {
 		//FPRINTK("Skb 0x%p hit DIRECT_TCP socket 0x%p\n", skb, sk);
-		if (!sk->sk_rcv_dst) {
+		if (sk->sk_state != TCP_LISTEN) {
+			if (!sk->sk_rcv_dst) {
 			sk->sk_rcv_dst = skb_dst(skb);
 			dst_hold(sk->sk_rcv_dst);
 			//FPRINTK("Record dst 0x%p[%u] on the direct TCP socket 0x%p\n", skb_dst(skb), atomic_read(&skb_dst(skb)->__refcnt), sk);
+			} else {
+				//FPRINTK("Dst 0x%p[%u] is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
+			}
 		} else {
-			//FPRINTK("Dst 0x%p[%u] is already recorded on direct TCP socket 0x%p\n", sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt), sk);
+			//FPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);
 		}
-		//} else {
-		//	FPRINTK("Skb 0x%p skip listen socket 0x%p\n", skb, sk);
-		//}
 	} else {
 		//if (ntohs(th->dest) != 22)
 		//	FPRINTK("Skb 0x%p hit common socket 0x%p\n", skb, sk);

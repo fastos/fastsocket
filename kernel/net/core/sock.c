@@ -1256,8 +1256,6 @@ struct sock *sk_clone(const struct sock *sk, const gfp_t priority)
 				af_family_clock_key_strings[newsk->sk_family]);
 
 		newsk->sk_dst_cache	= NULL;
-		if (newsk->sk_rcv_dst)
-			dst_hold(newsk->sk_rcv_dst);
 		newsk->sk_wmem_queued	= 0;
 		newsk->sk_forward_alloc = 0;
 		newsk->sk_send_head	= NULL;
