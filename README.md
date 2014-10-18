@@ -257,7 +257,7 @@ more CPU cores.
 ## NEXT ##
 
 We are now improving network stack efficiency in the case of long TCP connection.
-Three more features are introduced:
+Four more features are introduced:
 
 - Direct-TCP: Skip the route process when receiving packets if these packets belong
 to upper TCP sockets.
