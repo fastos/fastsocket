@@ -22,7 +22,7 @@
 
 With a rapid growth of NIC bandwidth and CPU cores on one single machine, a 
 scalable TCP network stack is performance-critical. However, stock Linux 
-kernel dose not scale well when CPU core number is above 4. It is even worse 
+kernel does not scale well when CPU core number is above 4. It is even worse 
 that the throughput could collapse when there are more than 12 CPU cores.
 
 Fastsocket is a scalable kernel TCP socket implementation and achieves a straight 
