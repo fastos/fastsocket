@@ -22,7 +22,7 @@
 
 With a rapid growth of NIC bandwidth and CPU cores on one single machine, a 
 scalable TCP network stack is performance-critical. However, stock Linux 
-kernel dose not scale well when CPU core number is above 4. It is even worse 
+kernel does not scale well when CPU core number is above 4. It is even worse 
 that the throughput could collapse when there are more than 12 CPU cores.
 
 Fastsocket is a scalable kernel TCP socket implementation and achieves a straight 
@@ -179,7 +179,7 @@ These load generators are:
 ### DEMO SERVER ###
 
 We provide a demo server In the demo directory of the repository. The demo 
-server dose nothing but read/write messages from/to network sockets and is 
+server does nothing but read/write messages from/to network sockets and is 
 purely used to study and benchmark the performance of network stack of Linux 
 kernel. When the demo server is running, it has little user CPU consumption, 
 which makes it a perfect network application to observe the network stack 
