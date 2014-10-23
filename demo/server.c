@@ -270,7 +270,8 @@ again:
 	return 0;
 }
 
-void init_signal(void) {
+void init_signal(void)
+{
 	sigset_t siglist;
 
 	if(sigemptyset(&siglist) == -1) {
@@ -294,7 +295,8 @@ void init_signal(void) {
 	}
 }
 
-void init_timer(void) {
+void init_timer(void)
+{
 	struct itimerval interval;
 
 	interval.it_interval.tv_sec = 1;
@@ -1131,7 +1133,8 @@ void *process_clients(void *arg)
 	return NULL;
 }
 
-void do_stats(void) {
+void do_stats(void)
+{
 	sigset_t siglist;
 	int signum;
 	int i;
@@ -1184,7 +1187,8 @@ void do_stats(void) {
 	}
 }
 
-void exit_cleanup(void) {
+void exit_cleanup(void)
+{
 	stop_workers();
 	exit(EXIT_FAILURE);
 }

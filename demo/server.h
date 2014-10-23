@@ -57,16 +57,14 @@ struct context_pool {
 	} *arr;
 };
 
-struct listen_addr
-{
+struct listen_addr {
 	int param_port;
 	struct in_addr listenip;
 	char param_ip[32];
 	int listen_fd;
 };
 
-struct proxy_addr
-{
+struct proxy_addr {
 	int param_port;
 	struct in_addr proxyip;
 	char param_ip[32];
