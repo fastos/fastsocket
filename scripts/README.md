@@ -23,7 +23,7 @@ features of the interface as well as a few system-wide configurations.
 Each NIC hardware queue and its associating interrupt is bound to a different
 CPU core. If there are more NIC hardware queues than CPU cores, then the queues 
 are configured in a round-robin way. Irqbalance service is disabled to prevent it 
-from changing the configuration afterwords.
+from changing the configuration afterwards.
 
 ### INTERRUPT THROTTLE RATE ###
 
@@ -51,5 +51,5 @@ establishes a 1-1 map between the first N Tx queues and the CPU cores available.
 ### IPTABLES ###
 
 During stress tests, iptables rules would consume much CPU cycles, leading to 
-poor network stack performance. Therefore, nic.sh would print a warming message 
+poor network stack performance. Therefore, nic.sh would print a warning message 
 if it notices that iptable is active.

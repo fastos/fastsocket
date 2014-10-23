@@ -1,7 +1,7 @@
 ## INTRODUCTION ##
 
 This is a simple TCP server and is used to benchmark and profile 
-the performace of the network stack of Linux Kernel. It can also 
+the performance of the network stack of Linux Kernel. It can also 
 be used to demonstrate the scalability and performance improvement 
 of Fastsocket over the base Linux kernel.
 
@@ -14,7 +14,7 @@ The demo server has two working modes: server mode and proxy mode.
 * **Server Mode**: The server will respond with a HTTP 200 OK once 
 it receives anything.
 * **Proxy Mode**: When the server receives something, it forwards 
-that to a backend server. And the server delivers the reponse from 
+that to a backend server. And the server delivers the response from 
 the backend server back to the client.
 
 As you can see, It is a simple and stupid TCP server. Please make 
@@ -51,8 +51,8 @@ address[ip:port]. Multiple backend addresses can be added.
 	- Default is disabled.
 - -v: Enable verbose statistics output.
 	- Default is disabled.
-- -d: Enable debug mode. Debug message will be loged into log file.
-	- Default is disbaled.
+- -d: Enable debug mode. Debug message will be logged into log file.
+	- Default is disabled.
 - -k: Enable HTTP keepalive. Currently it only works in the server 
 mode.
 	- Default is disabled.
@@ -89,7 +89,7 @@ To run the demo, here are the steps on each of two hosts.
 
 **Host B**:
 
-- Run the demo server in the default server mode with 12 workers(equal to CPU core number).
+- Run the demo server in the default server mode with 12 workers (equal to CPU core number).
 
 	`[root@localhost demo]# ./server -w 12 -a 10.0.0.2:80`
 
@@ -99,7 +99,7 @@ To run the demo, here are the steps on each of two hosts.
 
 **Host A**:
 
-- Run the work load generator(using ab as an example) to stress the demo server.
+- Run the work load generator (using ab as an example) to stress the demo server.
 
 	`[root@localhost ~]# ab -n 1000000 -c 100 http://10.0.0.2:80/`
 
