@@ -360,7 +360,10 @@ KBUILD_CFLAGS   := -Wall -Wundef -Wstrict-prototypes -Wno-trigraphs \
 ifneq (,$(filter $(ARCH), i386 x86_64))
 CPP_MAJOR       := $(shell $(CPP) -dumpversion 2>&1 | cut -d'.' -f1)
 CPP_MINOR       := $(shell $(CPP) -dumpversion 2>&1 | cut -d'.' -f2)
-CPP_PATCH       := $(shell $(CPP) -dumpversion 2>&1 | cut -d'.' -f3)
+# We need to set CPP_PATCH as 0 when there is no patch number
+CPP_PATCH_TMP   := $(shell $(CPP) -dumpversion 2>&1 | cut -d'.' -f3)
+CPP_PATCH       := $(shell if [ ! $(CPP_PATCH_TMP) ]; then \
+            echo "0"; else echo $(CPP_PATCH_TMP); fi)
 # Assumes that major, minor, and patch cannot exceed 999
 CPP_VERS        := $(shell expr $(CPP_MAJOR) \* 1000000 + $(CPP_MINOR) \* 1000 \
 		   + $(CPP_PATCH))
