@@ -14,9 +14,9 @@
   * [Demo Server](#demo-server)
 * [Evaluation](#evaluation)
   * [Nginx] (#nginx)
-  * [Haproxy] (#haproxy)
+  * [HAProxy] (#haproxy)
   * [Online Evaluation](#online-evaluation)
-* [Next](#next)
+* [New Features](#new-features)
 
 ## INTRODUCTION ##
 
@@ -32,18 +32,21 @@ socket applications, which means existing applications can take advantage of
 Fastsocket without changing their codes.
 
 Currently Fastsocket is implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6) 
-of CentOS-6.5. According to our evaluations, Fastsocket increases throughput of Nginx and
-Haproxy(measured by connections per second) by **290%** and **620%** on a 
+of CentOS-6.5 which is the latest version of redhat EL6, 
+since CentOS-6.5 is our major production environment system. 
+According to our evaluations, Fastsocket increases throughput of Nginx and
+HAProxy(measured by connections per second) by **290%** and **620%** on a 
 24-core machine, compared to the base CentOS-6.5 kernel.
 
 Moreover, Fastsocket can further exploit more from the hardware:
 
 - With Fastsocket, Hyper-Threading can make an extra **20%** performance increase.
 - With Fastsocket, NIC that support Flow-Director(like Intel 82599) can increase 
-the throughput by **15%** if the server works as a proxy(like Haproxy).
+the throughput by **15%** if the server works as a proxy(like HAProxy).
 
-Fastsocket has already been deployed in the SINA production environment and is 
-used with Haproxy to provide HTTP proxy service. More details are in
+Fastsocket (V1.0) has already been deployed in the SINA production environment. 
+Fastsocket is used with HAProxy to provide HTTP load balance service and 
+has been running stably since March 2014 More details are in
 the [Evaluation](#online-evaluation).
 
 Fastsocket is released under GPLv2 and we promise that we would never ask for any
@@ -135,7 +138,7 @@ If you are interested in how nic.sh works, please refer to [Scripts](scripts/REA
 ### SUITABLE SCENARIOS###
 
 Generally, scenarios meeting the following conditions will benefit the most 
-from Fastsocket:
+from Fastsocket (V1.0):
 
 * The machine has no less than 8 CPU cores.
 * Large portion of the CPU cycles is spent in network softirq and socket 
@@ -145,7 +148,7 @@ related system calls.
 * Application uses multiple processes to accept connections individually.
 
 Meanwhile, we are developing Fastsocket to improve the network stack performance 
-in more general scenarios.
+in more general scenarios. You can refer to [New Features](#new-features).
 
 ### HOW TO USE ###
 
@@ -156,7 +159,7 @@ when launching an application. For example, ngnix can be started with Fastsocket
 	[root@localhost library]# LD_PRELOAD=./libfsocket.so nginx
 
 Without the preloaded library, applications can run as if they are on the
-original kernel.
+original kernel, which provides a super quick rollback in case there is a need. 
 
 	[root@localhost ~]# nginx
 
@@ -207,12 +210,12 @@ Note: **DO DISABLE accept_mutex!** With default Fastsocket module parameters,
 Fastsocket has partioned listen socket, therefore, there is no need to force
 user to accept connections one by one.
 
-From the figure below, Fastsocket on Linux 2.6.32 achieves 470K connection per second and 83%
-efficiency up to 24 cores, while performance of base 2.6.32 kernel increases
-non-linearly up to 12 cores and drops dramatically to 159K with 24 cores. The
-latest 3.13 kernel doubles the throughput to 283K when using 24 cores compared
-with 2.6.32. However, it has not completely solve the scalability bottlenecks,
-preventing performance from growing when more than 12 cores are used.
+From the figure below, Fastsocket on 24 CPU cores achieves 475K connection per second (cps), 
+with a speed up of 21X. The throughput of base CentOS-6.5 kernel increases
+non-linearly up to 12 CPU cores and drops dramatically to 159K cps with 24 CPU cores. The
+latest 3.13 kernel doubles the throughput to 283K cps when using 24 CPU cores compared
+with the base CentOS-6.5 kernel. However, it has not completely solved the scalability bottlenecks,
+preventing it from scaling beyond 12 CPU cores.
 
 ### HAProxy ###
 
@@ -220,14 +223,14 @@ Some important configurations:
 
 - Worker number is set to the number of CPU cores.
 - RFD(Receive Flow Deliver) in Fastsocket is enabled.
-- HTTP Keep-alive is disabled on Haproxy for a short connection test.
+- HTTP Keep-alive is disabled on HAProxy for a short connection test.
 - A client runs http_load with a concurrency of 500 multiplied by number of cores.
 - A backend server responds each incoming HTTP request with a 64 bytes message.
 
 As shown in the same figure, Fastsocket presents an excellent scalability performance, 
-which is very similar to the previous nginx case. 
-Fastsocket outperforms Linux 3.13 by 14K connection per second and base 2.6.32
-by 37K when using 24 cores, though the one core throughputs are very close among
+which is very similar to the previous Nginx case. 
+Fastsocket outperforms Linux 3.13 by 139K cps and base CentOS-6.5 kernel
+by 370K cps when using 24 CPU cores, though the one core throughputs are very close among
 all the three kernels.
 
 ![Throughput](images/throughput.png "Throughput")
@@ -235,7 +238,7 @@ all the three kernels.
 ### ONLINE EVALUATION ###
 
 As mentioned before, Fastsocket has already been deployed in the SINA production
-environment. One typical scenario is using Fastsocket with Haproxy to provide 
+environment. One typical scenario is using Fastsocket with HAProxy to provide 
 HTTP load balance service to WEIBO and other SINA productions.
 
 In the figure below, it is the CPU utilization of a 8-core servers within 24 hours. 
@@ -248,32 +251,44 @@ We can see from the figure, what happened after Fastsocket is used:
 
 - The load of each CPU core is perfect balanced.
 - The average CPU utilization of all CPU cores is reduced by 10%.
-- As a result, the effective capacity of the Haproxy server is increased by 85%.
+- As a result, the effective capacity of the HAProxy server is increased by 85%.
 
 Moreover, since the server is an old 8-core machine, we expect Fastsocket would 
 make more performance improvement when Fastsocket is deployed on a machine with 
-more CPU cores.
+more CPU cores (It is already observed on a 12-core machine after updating Fastsocket).
 
-## NEXT ##
+## NEW FEATURES ##
 
 We are now improving network stack efficiency in the case of long TCP connection.
 Four more features are introduced:
 
-- Direct-TCP: Skip the route process when receiving packets if these packets belong
+- **Direct-TCP**: Skip the route process when receiving packets if these packets belong
 to upper TCP sockets.
-- Skb-Pool: Get skb from per-core pre-allocated skb pool instead of kernel slab.
-- Receive-CPU-Select: Steer a packet to a CPU core where application is waiting for it. 
+- **Skb-Pool**: Get skb from per-core pre-allocated skb pool instead of kernel slab.
+- **Receive-CPU-Select**: Steer a packet to a CPU core where application is waiting for it. 
 The idea is similar with RFS from Google, however, it is lighter and more accurate.
-- RPS-Framework: We extend the idea of RPS that is to redispatch the receiving packets 
+- **RPS-Framework**: We extend the idea of RPS that is to redispatch the receiving packets 
 before they entering the network stack. We build a framework where developers can 
 implement their own packets-redispatching rules in out-of-tree module and hook into 
 the RPS framework.
 
 We evaluated our new work on redis which is a typical and popular key-value cache application.
 
-The 8-redis-instances test shows:
+Some important configurations:
 
-- With commodity NIC supporting RSS, Fastsocket improves the throughput by more than 20%.
-- WIth advanced NIC supporting Flow-Director(Intel 82599), a 45% improvement can be reached.
+- Redis works in persistent TCP connection mode.
+- Multiple Redis instances are set up.
+- Each Redis instance listens on a different port and binds to a different CPU core.
 
-These codes will be released soon when they are proved stable.
+The 8-redis-instance test shows:
+
+- With commodity NIC supporting RSS, Fastsocket improves the throughput by more than **20%**.
+- WIth advanced NIC supporting Flow-Director(Intel 82599), a **45%** improvement can be reached.
+
+Notes:
+
+- These new features are in the experimental stage, neither well tuned for performance, 
+nor proved stable by long-time production environment running.
+- There new features are complementary to the features in V1.0, therefore, Nginx and 
+HAProxy performance can be further increased by Fastsocket with these new features.
+
