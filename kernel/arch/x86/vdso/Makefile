@@ -25,7 +25,12 @@ targets += vdso.so vdso.so.dbg vdso.lds $(vobjs-y)
 
 export CPPFLAGS_vdso.lds += -P -C
 
-VDSO_LDFLAGS_vdso.lds = -m elf_x86_64 -Wl,-soname=linux-vdso.so.1 \
+GCC_X86_64_LDFLAG := $(shell if [ $(CPP_VERS) -ge 4006000 ]; then \
+		   echo "-m64"; else echo "-m elf_x86_64"; fi)
+GCC_X86_32_LDFLAG := $(shell if [ $(CPP_VERS) -ge 4006000 ]; then \
+		   echo "-m32"; else echo "-m elf_i386"; fi)
+
+VDSO_LDFLAGS_vdso.lds = $(GCC_X86_64_LDFLAG) -Wl,-soname=linux-vdso.so.1 \
 		      	-Wl,-z,max-page-size=4096 -Wl,-z,common-page-size=4096
 
 $(obj)/vdso.o: $(src)/vdso.S $(obj)/vdso.so
@@ -69,7 +74,7 @@ vdso32.so-$(VDSO32-y)		+= sysenter
 vdso32-images			= $(vdso32.so-y:%=vdso32-%.so)
 
 CPPFLAGS_vdso32.lds = $(CPPFLAGS_vdso.lds)
-VDSO_LDFLAGS_vdso32.lds = -m elf_i386 -Wl,-soname=linux-gate.so.1
+VDSO_LDFLAGS_vdso32.lds = $(GCC_X86_32_LDFLAG) -Wl,-soname=linux-gate.so.1
 
 # This makes sure the $(obj) subdirectory exists even though vdso32/
 # is not a kbuild sub-make subdirectory.
