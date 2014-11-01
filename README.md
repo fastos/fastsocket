@@ -17,6 +17,7 @@
   * [HAProxy] (#haproxy)
   * [Online Evaluation](#online-evaluation)
 * [New Features](#new-features)
+* [Contacts](#contacts)
 
 ## INTRODUCTION ##
 
@@ -291,4 +292,8 @@ Notes:
 nor proved stable by long-time production environment running.
 - There new features are complementary to the features in V1.0, therefore, Nginx and 
 HAProxy performance can be further increased by Fastsocket with these new features.
+
+## CONTACTS ##
+
+Mailing-list: fastsocket@librelist.com
 
