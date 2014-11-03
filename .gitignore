@@ -1,0 +1,8 @@
+*.ko.*
+cscope.*
+*.so
+*.swp
+tags
+*.ucode
+*.dat
+*.diff

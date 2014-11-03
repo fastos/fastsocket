@@ -24,10 +24,12 @@
 static int fsocket_channel_fd = -1;
 
 #define FSOCKET_ERR(msg, ...)
-//#define FSOCKET_ERR(msg, ...) \
-//do {\
-//	fprintf(stderr, "Fastsocket Library:" msg, ##__VA_ARGS__);\
-//}while(0)
+/*
+#define FSOCKET_ERR(msg, ...) \
+do {\
+	fprintf(stderr, "Fastsocket Library:" msg, ##__VA_ARGS__);\
+}while(0)
+*/
 
 #define INIT_FDSET_NUM	65536
 
@@ -70,12 +72,12 @@ void fastsocket_init(void)
 
 	fsocket_fd_num = INIT_FDSET_NUM;
 
-        CPU_ZERO(&cmask);
+	CPU_ZERO(&cmask);
 
 	for (i = 0; i < get_cpus(); i++)
 		CPU_SET(i, &cmask);
 
-        ret = sched_setaffinity(0, get_cpus(), &cmask);
+	ret = sched_setaffinity(0, get_cpus(), &cmask);
 	if (ret < 0) {
 		FSOCKET_ERR("Clear process CPU affinity failed\n");
 		exit(-1);
