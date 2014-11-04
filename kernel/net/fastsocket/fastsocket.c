@@ -1863,18 +1863,22 @@ static int __init  fastsocket_init(void)
 
 	if (ret < 0) {
 		EPRINTK_LIMIT(ERR, "Register fastsocket channel device failed\n");
-		return -ENOMEM;
+		goto err1;
 	}
 
 	socket_cachep = kmem_cache_create("fastsocket_socket_cache", sizeof(struct fsocket_alloc), 0,
 			SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT |
 			SLAB_MEM_SPREAD | SLAB_PANIC, init_once);
+	if (!socket_cachep) {
+		EPRINTK_LIMIT(ERR, "Allocate fastsocket cachep failed\n");
+		ret = -ENOMEM;
+		goto err2;
+	}
 
 	ret = register_filesystem(&fastsock_fs_type);
 	if (ret) {
-		misc_deregister(&fastsocket_dev);
 		EPRINTK_LIMIT(ERR, "Register fastsocket filesystem failed\n");
-		return ret;
+		goto err3;
 	}
 
 	sock_mnt = kern_mount(&fastsock_fs_type);
@@ -1883,9 +1887,7 @@ static int __init  fastsocket_init(void)
 	if (IS_ERR(sock_mnt)) {
 		EPRINTK_LIMIT(ERR, "Mount fastsocket filesystem failed\n");
 		ret = PTR_ERR(sock_mnt);
-		misc_deregister(&fastsocket_dev);
-		unregister_filesystem(&fastsock_fs_type);
-		return ret;
+		goto err4;
 	}
 
 	printk(KERN_INFO "Fastsocket: Load Module\n");
@@ -1909,6 +1911,15 @@ static int __init  fastsocket_init(void)
 		printk(KERN_INFO "Fastsocket: Enable Receive CPU Selection\n");
 	}
 
+	return ret;
+
+err4:
+	unregister_filesystem(&fastsock_fs_type);
+err3:
+	kmem_cache_destroy(socket_cachep);	
+err2:
+	misc_deregister(&fastsocket_dev);
+err1:
 	return ret;
 }
 
