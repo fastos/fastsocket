@@ -15,6 +15,7 @@
 
 #include <stdlib.h>
 #include <stdio.h>
+#include <inttypes.h>
 #include <errno.h>
 #include <assert.h>
 #include <sys/socket.h>
@@ -1167,7 +1168,7 @@ void do_stats(void)
 			{
 				trancnt += wdata[i].trancnt - wdata[i].trancnt_prev;
 				if (enable_verbose)
-					fprintf(p, "%llu[%llu-%llu-%llu-%llu-%llu-%llu-%llu-%llu]  ",
+					fprintf(p, "%"PRIu64"[%"PRIu64"-%"PRIu64"-%"PRIu64"-%"PRIu64"-%"PRIu64"-%"PRIu64"-%"PRIu64"-%"PRIu64"]  ",
 						wdata[i].trancnt - wdata[i].trancnt_prev, wdata[i].polls_mpt,
 						wdata[i].polls_lst, wdata[i].polls_min, wdata[i].polls_max,
 						wdata[i].polls_avg, wdata[i].accept_cnt, wdata[i].read_cnt,
@@ -1175,7 +1176,7 @@ void do_stats(void)
 				wdata[i].trancnt_prev = wdata[i].trancnt;
 			}
 
-			fprintf(p, "\tRequest/s %8llu\n", trancnt);
+			fprintf(p, "\tRequest/s %8"PRIu64"\n", trancnt);
 
 		} else if(signum == SIGINT) {
 			stop_workers();
