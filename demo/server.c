@@ -848,14 +848,11 @@ static void process_write(struct conn_context *client_ctx)
 	int ep_fd, fd;
 	int events = client_ctx->events;
 	int cpu_id = client_ctx->cpu_id;
-	char *buf;
-	int len, ret;
+	int ret;
 	struct epoll_event evt;
 
 	ep_fd = client_ctx->ep_fd;
 	fd = client_ctx->fd;
-	buf = client_ctx->buf;
-	len = client_ctx->data_len;
 
 	print_d("Process write event[%02x]\n", events);
 
@@ -1170,7 +1167,7 @@ void do_stats(void)
 			{
 				trancnt += wdata[i].trancnt - wdata[i].trancnt_prev;
 				if (enable_verbose)
-					fprintf(p, "%lu[%lu-%lu-%lu-%lu-%lu-%lu-%lu-%lu]  ",
+					fprintf(p, "%llu[%llu-%llu-%llu-%llu-%llu-%llu-%llu-%llu]  ",
 						wdata[i].trancnt - wdata[i].trancnt_prev, wdata[i].polls_mpt,
 						wdata[i].polls_lst, wdata[i].polls_min, wdata[i].polls_max,
 						wdata[i].polls_avg, wdata[i].accept_cnt, wdata[i].read_cnt,
@@ -1178,7 +1175,7 @@ void do_stats(void)
 				wdata[i].trancnt_prev = wdata[i].trancnt;
 			}
 
-			fprintf(p, "\tRequest/s %8lu\n", trancnt);
+			fprintf(p, "\tRequest/s %8llu\n", trancnt);
 
 		} else if(signum == SIGINT) {
 			stop_workers();

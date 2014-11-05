@@ -1,8 +1,7 @@
 # Makefile for server
 
 CC = gcc
-#CFLAGS = -Wall -Werror -g
-CFLAGS = -Wall -g
+CFLAGS = -Wall -g -Werror
 LDFLAGS = -pthread
 
 all: server
