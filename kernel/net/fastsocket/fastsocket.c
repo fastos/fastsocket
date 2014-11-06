@@ -1013,7 +1013,7 @@ static int fsocket_process_affinity_check(int rcpu)
 {
 	int ccpu, ncpu, cpu;
 	int tcpu = -1;
-	struct cpumask omask;
+	cpumask_var_t omask;
 	//struct socket *sock;
 
 	if (enable_listen_spawn == DISABLE_LISTEN_SPAWN) {
@@ -1031,9 +1031,13 @@ static int fsocket_process_affinity_check(int rcpu)
 	if (rcpu >= 0)
 		return rcpu;
 
-	sched_getaffinity(current->pid, &omask);
-	ccpu = cpumask_first(&omask);
-	ncpu = cpumask_next(ccpu, &omask);
+	if (!alloc_cpumask_var(&omask, GFP_KERNEL))
+		return -ENOMEM;
+
+	sched_getaffinity(current->pid, omask);
+	ccpu = cpumask_first(omask);
+	ncpu = cpumask_next(ccpu, omask);
+	free_cpumask_var(omask);
 
 	if (ccpu >= nr_cpumask_bits) {
 		DPRINTK(DEBUG, "Current process affinity is messed up\n");
@@ -1158,8 +1162,7 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	}
 
 	ret = fsocket_process_affinity_check(tcpu);
-	if (ret < 0)
-	{
+	if (ret < 0) {
 		EPRINTK_LIMIT(ERR, "Set CPU affinity for process failed\n");
 		goto out;
 	}
