@@ -1195,9 +1195,11 @@ void stop_processes(void)
 {
 	int i;
 
-	for(i = 0; i < num_workers; i++) {
-		if (wdata[i].process)
-			kill(wdata[i].process, SIGTERM);
+	if (wdata) {
+		for(i = 0; i < num_workers; i++) {
+			if (wdata[i].process)
+				kill(wdata[i].process, SIGTERM);
+		}
 	}
 }
 
