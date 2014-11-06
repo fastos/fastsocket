@@ -419,62 +419,68 @@ out_unlock:
 
 static struct socket *fsocket_alloc_socket(void)
 {
+	static const struct inode_operations empty_iops;
+	static const struct file_operations empty_fops;
 	struct socket *sock;
-	struct inode *inode = NULL;
-
 	//FIXME: Just guess this inode number is not something really matters.
 	static unsigned int last_ino = FSOCKET_INODE_START;
+	struct inode *inode = NULL;	
 
 	sock = (struct socket *)kmem_cache_alloc(socket_cachep, GFP_KERNEL);
-	if (sock != NULL) {
-		static const struct inode_operations empty_iops;
-		static const struct file_operations empty_fops;
-
-		if(!try_module_get(THIS_MODULE)) {
-			kmem_cache_free(socket_cachep, sock);
-			return NULL;
-		}
-
-		if (security_inode_alloc(SOCK_INODE(sock))) {
-			module_put(THIS_MODULE);
-			kmem_cache_free(socket_cachep, sock);
-			return NULL;
-		}
-
-		init_waitqueue_head(&sock->wait);
-
-		sock->fasync_list = NULL;
-		sock->state = SS_UNCONNECTED;
-		sock->flags = 0;
-		sock->ops = NULL;
-		sock->sk = NULL;
-		sock->file = NULL;
-
-		sock->type = 0;
-
-		inode = SOCK_INODE(sock);
-
-		inode->i_op = &empty_iops;
-		inode->i_fop = &empty_fops;
-		inode->i_sb = sock_mnt->mnt_sb;
-		atomic_set(&inode->i_count, 1);
-
-		INIT_LIST_HEAD(&inode->i_list);
-		INIT_LIST_HEAD(&inode->i_sb_list);
-
-		inode->i_ino = ++last_ino;
-		inode->i_state = 0;
-
-		kmemcheck_annotate_bitfield(sock, type);
-		inode->i_mode = S_IFSOCK | S_IRWXUGO;
-		inode->i_uid = current_fsuid();
-		inode->i_gid = current_fsgid();
-
-		percpu_add(fastsockets_in_use, 1);
-
-		DPRINTK(DEBUG, "Allocat inode 0x%p\n", inode);
+	if (!sock) {
+		DPRINTK(ERR, "Fail to allocate sock\n");
+		goto err1;
 	}
+	
+	if(!try_module_get(THIS_MODULE)) {
+		goto err2;
+	}
+	
+	if (security_inode_alloc(SOCK_INODE(sock))) {
+		goto err3;
+	}
+	
+	init_waitqueue_head(&sock->wait);
+	
+	sock->fasync_list = NULL;
+	sock->state = SS_UNCONNECTED;
+	sock->flags = 0;
+	sock->ops = NULL;
+	sock->sk = NULL;
+	sock->file = NULL;
+	
+	sock->type = 0;
+	
+	inode = SOCK_INODE(sock);
+	
+	inode->i_op = &empty_iops;
+	inode->i_fop = &empty_fops;
+	inode->i_sb = sock_mnt->mnt_sb;
+	atomic_set(&inode->i_count, 1);
+	
+	INIT_LIST_HEAD(&inode->i_list);
+	INIT_LIST_HEAD(&inode->i_sb_list);
+	
+	inode->i_ino = ++last_ino;
+	inode->i_state = 0;
+	
+	kmemcheck_annotate_bitfield(sock, type);
+	inode->i_mode = S_IFSOCK | S_IRWXUGO;
+	inode->i_uid = current_fsuid();
+	inode->i_gid = current_fsgid();
+	
+	percpu_add(fastsockets_in_use, 1);
+	
+	DPRINTK(DEBUG, "Allocat inode 0x%p\n", inode);
+
 	return sock;
+	
+err3:
+	module_put(THIS_MODULE);
+err2:
+	kmem_cache_free(socket_cachep, sock);
+err1:
+	return NULL;
 }
 
 #define DNAME_INLINE_LEN (sizeof(struct dentry)-offsetof(struct dentry,d_iname))
@@ -1207,21 +1213,15 @@ out:
 	return ret;
 }
 
-static int fastsocket_spawn_listen(struct fsocket_ioctl_arg *u_arg)
+static int fastsocket_spawn_listen(struct fsocket_ioctl_arg *arg)
 {
-	struct fsocket_ioctl_arg arg;
 	struct file *tfile;
 	int fd, tcpu, ret, fput_needed;
 
-	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
-		return -EFAULT;
-	}
+	DPRINTK(DEBUG, "Listen spawn listen fd %d\n", arg->fd);
 
-	DPRINTK(DEBUG, "Listen spawn listen fd %d\n", arg.fd);
-
-	fd = arg.fd;
-	tcpu = arg.op.spawn_op.cpu;
+	fd = arg->fd;
+	tcpu = arg->op.spawn_op.cpu;
 
 	tfile = fget_light(fd, &fput_needed);
 	if (tfile == NULL) {
@@ -1408,31 +1408,25 @@ out:
 	return err;
 }
 
-int fastsocket_accept(struct fsocket_ioctl_arg *u_arg)
+int fastsocket_accept(struct fsocket_ioctl_arg *arg)
 {
 	int ret;
-	struct fsocket_ioctl_arg arg;
 	struct file *tfile;
 	int fput_need;
 
-	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
-		return -EFAULT;
-	}
-
-	tfile =	fget_light(arg.fd, &fput_need);
+	tfile =	fget_light(arg->fd, &fput_need);
 	if (tfile == NULL) {
 		EPRINTK_LIMIT(ERR, "Accept file don't exist!\n");
 		return -ENOENT;
 	}
 
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
-		DPRINTK(DEBUG, "Accept fastsocket %d\n", arg.fd);
-		ret = fsocket_accept(tfile, arg.op.accept_op.sockaddr,
-				arg.op.accept_op.sockaddr_len, arg.op.accept_op.flags);
+		DPRINTK(DEBUG, "Accept fastsocket %d\n", arg->fd);
+		ret = fsocket_accept(tfile, arg->op.accept_op.sockaddr,
+				arg->op.accept_op.sockaddr_len, arg->op.accept_op.flags);
 	} else {
-		DPRINTK(INFO, "Accept non-fastsocket %d\n", arg.fd);
-		ret = sys_accept(arg.fd, arg.op.accept_op.sockaddr, arg.op.accept_op.sockaddr_len);
+		DPRINTK(INFO, "Accept non-fastsocket %d\n", arg->fd);
+		ret = sys_accept(arg->fd, arg->op.accept_op.sockaddr, arg->op.accept_op.sockaddr_len);
 	}
 	fput_light(tfile, fput_need);
 
@@ -1478,19 +1472,13 @@ out:
 	return ret;
 }
 
-static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
+static int fastsocket_listen(struct fsocket_ioctl_arg *arg)
 {
-	struct fsocket_ioctl_arg arg;
 	struct file *tfile;
 	int fd, backlog, ret, fput_needed;
 
-	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
-		return -EFAULT;
-	}
-
-	fd = arg.fd;
-	backlog = arg.backlog;
+	fd = arg->fd;
+	backlog = arg->backlog;
 
 	tfile = fget_light(fd, &fput_needed);
 	if (tfile == NULL) {
@@ -1516,21 +1504,15 @@ static int fastsocket_listen(struct fsocket_ioctl_arg *u_arg)
 	return ret;
 }
 
-static int fastsocket_socket(struct fsocket_ioctl_arg *u_arg)
+static int fastsocket_socket(struct fsocket_ioctl_arg *arg)
 {
-	struct fsocket_ioctl_arg arg;
 	int family, type, protocol, fd;
 
 	DPRINTK(DEBUG,"Try to create fastsocket\n");
 
-	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
-		return -EFAULT;
-	}
-
-	family = arg.op.socket_op.family;
-	type = arg.op.socket_op.type;
-	protocol = arg.op.socket_op.protocol;
+	family = arg->op.socket_op.family;
+	type = arg->op.socket_op.type;
+	protocol = arg->op.socket_op.protocol;
 
 	if (( family == AF_INET ) &&
 		((type & SOCK_TYPE_MASK) == SOCK_STREAM )) {
@@ -1544,21 +1526,15 @@ static int fastsocket_socket(struct fsocket_ioctl_arg *u_arg)
 	}
 }
 
-static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
+static int fastsocket_close(struct fsocket_ioctl_arg * arg)
 {
 	int error;
 	struct file *tfile;
-	struct fsocket_ioctl_arg arg;
 	int fput_need;
 
-	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
-		return -EFAULT;
-	}
+	DPRINTK(DEBUG,"Close fastsocket %d\n", arg->fd);
 
-	DPRINTK(DEBUG,"Close fastsocket %d\n", arg.fd);
-
-	tfile = fget_light(arg.fd, &fput_need);
+	tfile = fget_light(arg->fd, &fput_need);
 	if (tfile == NULL) {
 		EPRINTK_LIMIT(ERR, "Close file don't exist!\n");
 		return -EINVAL;
@@ -1566,11 +1542,11 @@ static int fastsocket_close(struct fsocket_ioctl_arg * u_arg)
 
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
 		fput_light(tfile, fput_need);
-		error = fsocket_close(arg.fd);
+		error = fsocket_close(arg->fd);
 	} else {
 		fput_light(tfile, fput_need);
-		DPRINTK(INFO, "Close non fastsocket %d\n", arg.fd);
-		error = sys_close(arg.fd);
+		DPRINTK(INFO, "Close non fastsocket %d\n", arg->fd);
+		error = sys_close(arg->fd);
 	}
 
 	return error;
@@ -1599,30 +1575,24 @@ static int fsocket_shutdown_listen(struct file *file, int how)
 	return err;
 }
 
-static int fastsocket_shutdown_listen(struct fsocket_ioctl_arg * u_arg)
+static int fastsocket_shutdown_listen(struct fsocket_ioctl_arg *arg)
 {
 	int ret;
-	struct fsocket_ioctl_arg arg;
 	struct file *tfile;
 	int fput_need;
 
-	if (copy_from_user(&arg, u_arg, sizeof(arg))) {
-		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
-		return -EFAULT;
-	}
-
-	tfile =	fget_light(arg.fd, &fput_need);
+	tfile =	fget_light(arg->fd, &fput_need);
 	if (tfile == NULL) {
 		EPRINTK_LIMIT(ERR, "Accept file don't exist!\n");
 		return -ENOENT;
 	}
 
 	if (tfile->f_mode & FMODE_FASTSOCKET) {
-		DPRINTK(DEBUG, "Shutdown fastsocket %d\n", arg.fd);
-		ret = fsocket_shutdown_listen(tfile, arg.op.shutdown_op.how);
+		DPRINTK(DEBUG, "Shutdown fastsocket %d\n", arg->fd);
+		ret = fsocket_shutdown_listen(tfile, arg->op.shutdown_op.how);
 	} else {
-		DPRINTK(INFO, "Shutdown non-fastsocket %d\n", arg.fd);
-		ret = sys_shutdown(arg.fd, arg.op.shutdown_op.how);
+		DPRINTK(INFO, "Shutdown non-fastsocket %d\n", arg->fd);
+		ret = sys_shutdown(arg->fd, arg->op.shutdown_op.how);
 	}
 	fput_light(tfile, fput_need);
 
@@ -1685,21 +1655,28 @@ static int fastsocket_epoll_ctl(struct fsocket_ioctl_arg *u_arg)
 }
 #endif
 
-static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long __user u_arg)
 {
+	struct fsocket_ioctl_arg k_arg;
+
+	if (copy_from_user(&k_arg, (struct fsocket_ioctl_arg *)u_arg, sizeof(k_arg))) {
+		EPRINTK_LIMIT(ERR, "copy ioctl parameter from user space to kernel failed\n");
+		return -EFAULT;
+	}
+
 	switch (cmd) {
 	case FSOCKET_IOC_SOCKET:
-		return fastsocket_socket((struct fsocket_ioctl_arg *) arg);
+		return fastsocket_socket(&k_arg);
 	case FSOCKET_IOC_LISTEN:
-		return fastsocket_listen((struct fsocket_ioctl_arg *) arg);
+		return fastsocket_listen(&k_arg);
 	case FSOCKET_IOC_SPAWN_LISTEN:
-		return fastsocket_spawn_listen((struct fsocket_ioctl_arg *) arg);
+		return fastsocket_spawn_listen(&k_arg);
 	case FSOCKET_IOC_ACCEPT:
-		return fastsocket_accept((struct fsocket_ioctl_arg *)arg);
+		return fastsocket_accept(&k_arg);
 	case FSOCKET_IOC_CLOSE:
-		return fastsocket_close((struct fsocket_ioctl_arg *) arg);
+		return fastsocket_close(&k_arg);
 	case FSOCKET_IOC_SHUTDOWN_LISTEN:
-		return fastsocket_shutdown_listen((struct fsocket_ioctl_arg *) arg);
+		return fastsocket_shutdown_listen(&k_arg);
 	//case FSOCKET_IOC_EPOLL_CTL:
 	//	return fastsocket_epoll_ctl((struct fsocket_ioctl_arg *)arg);
 	default:
