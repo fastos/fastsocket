@@ -1039,12 +1039,12 @@ static int fsocket_process_affinity_check(int rcpu)
 	ncpu = cpumask_next(ccpu, omask);
 	free_cpumask_var(omask);
 
-	if (ccpu >= nr_cpumask_bits) {
+	if (ccpu >= nr_cpu_ids) {
 		DPRINTK(DEBUG, "Current process affinity is messed up\n");
 		return -EINVAL;
 	}
 
-	if (ncpu >= nr_cpumask_bits) {
+	if (ncpu >= nr_cpu_ids) {
 		DPRINTK(INFO, "Current process already binds to CPU %d\n", ccpu);
 		return ccpu;
 	}
