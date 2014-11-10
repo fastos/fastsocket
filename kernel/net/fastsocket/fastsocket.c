@@ -1013,7 +1013,7 @@ static int fsocket_process_affinity_check(int rcpu)
 {
 	int ccpu, ncpu, cpu;
 	int tcpu = -1;
-	struct cpumask omask;
+	cpumask_var_t omask;
 	//struct socket *sock;
 
 	if (enable_listen_spawn == DISABLE_LISTEN_SPAWN) {
@@ -1031,16 +1031,20 @@ static int fsocket_process_affinity_check(int rcpu)
 	if (rcpu >= 0)
 		return rcpu;
 
-	sched_getaffinity(current->pid, &omask);
-	ccpu = cpumask_first(&omask);
-	ncpu = cpumask_next(ccpu, &omask);
+	if (!alloc_cpumask_var(&omask, GFP_KERNEL))
+		return -ENOMEM;
 
-	if (ccpu >= nr_cpumask_bits) {
+	sched_getaffinity(current->pid, omask);
+	ccpu = cpumask_first(omask);
+	ncpu = cpumask_next(ccpu, omask);
+	free_cpumask_var(omask);
+
+	if (ccpu >= nr_cpu_ids) {
 		DPRINTK(DEBUG, "Current process affinity is messed up\n");
 		return -EINVAL;
 	}
 
-	if (ncpu >= nr_cpumask_bits) {
+	if (ncpu >= nr_cpu_ids) {
 		DPRINTK(INFO, "Current process already binds to CPU %d\n", ccpu);
 		return ccpu;
 	}
@@ -1158,8 +1162,7 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	}
 
 	ret = fsocket_process_affinity_check(tcpu);
-	if (ret < 0)
-	{
+	if (ret < 0) {
 		EPRINTK_LIMIT(ERR, "Set CPU affinity for process failed\n");
 		goto out;
 	}
@@ -1344,8 +1347,7 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 	if (unlikely(newfd < 0)) {
 		EPRINTK_LIMIT(ERR, "Allocate file for new socket failed\n");
 		err = newfd;
-		fsock_free_sock(newsock);
-		goto out;
+		goto out_newfd;
 	}
 
 	if (!file->sub_file) {
@@ -1404,6 +1406,8 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 out_fd:
 	__fsocket_filp_close(newfile);
 	put_unused_fd(newfd);
+out_newfd:
+	fsock_free_sock(newsock);
 out:
 	return err;
 }
