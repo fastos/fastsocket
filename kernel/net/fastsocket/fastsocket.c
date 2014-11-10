@@ -1347,8 +1347,7 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 	if (unlikely(newfd < 0)) {
 		EPRINTK_LIMIT(ERR, "Allocate file for new socket failed\n");
 		err = newfd;
-		fsock_free_sock(newsock);
-		goto out;
+		goto out_newfd;
 	}
 
 	if (!file->sub_file) {
@@ -1407,6 +1406,8 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 out_fd:
 	__fsocket_filp_close(newfile);
 	put_unused_fd(newfd);
+out_newfd:
+	fsock_free_sock(newsock);
 out:
 	return err;
 }
