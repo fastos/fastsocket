@@ -690,7 +690,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	if (err < 0) {
 		EPRINTK_LIMIT(ERR, "Initialize Inet Socket failed\n");
 		put_empty_filp(sfile);
-		fsock_release_sock(sock);
+		fsock_free_sock(sock);
 		goto out;
 	}
 
@@ -704,6 +704,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		EPRINTK_LIMIT(ERR, "Spawn listen socket alloc dentry failed\n");
 		put_empty_filp(sfile);
 		fsock_release_sock(sock);
+		fsock_free_sock(sock);
 		goto out;
 	}
 
@@ -737,7 +738,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	if (nfile == NULL) {
 		err = -ENOMEM;
 		EPRINTK_LIMIT(ERR, "Spawn global listen socket alloc file failed\n");
-		__fsocket_filp_close(sfile);
+		__fsocket_filp_close(sfile);		
 		goto out;
 	}
 
@@ -748,7 +749,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		err = -ENOMEM;
 		EPRINTK_LIMIT(ERR, "Spawn listen socket alloc dentry failed\n");
 		put_empty_filp(nfile);
-		__fsocket_filp_close(sfile);
+		__fsocket_filp_close(sfile);		
 		goto out;
 	}
 
@@ -1347,7 +1348,8 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 	if (unlikely(newfd < 0)) {
 		EPRINTK_LIMIT(ERR, "Allocate file for new socket failed\n");
 		err = newfd;
-		goto out_newfd;
+		fsock_free_sock(newsock);
+		goto out;
 	}
 
 	if (!file->sub_file) {
@@ -1406,8 +1408,6 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 out_fd:
 	__fsocket_filp_close(newfile);
 	put_unused_fd(newfd);
-out_newfd:
-	fsock_free_sock(newsock);
 out:
 	return err;
 }
