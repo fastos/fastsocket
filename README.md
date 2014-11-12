@@ -242,7 +242,7 @@ As mentioned before, Fastsocket has already been deployed in the SINA production
 environment. One typical scenario is using Fastsocket with HAProxy to provide 
 HTTP load balance service to WEIBO and other SINA productions.
 
-In the figure below, it is the CPU utilization of a 8-core servers within 24 hours. 
+In the figure below, it is the CPU utilization of an 8-core servers within 24 hours. 
 Figure (a) shows the CPU utilization before deploying Fastsocket and figure (b)
 shows the CPU utilization after deploying Fastsocket.
 
