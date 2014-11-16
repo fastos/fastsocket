@@ -504,8 +504,10 @@ static struct dentry *fsock_d_alloc(struct socket *sock, struct dentry *parent, 
 
 	if (name->len > DNAME_INLINE_LEN-1) {
 		dname = kmalloc(name->len + 1, GFP_KERNEL);
-		if (!dname)
+		if (!dname) {
+			kmem_cache_free(dentry_cache, dentry);
 			return NULL;
+		}
 	} else {
 		dname = dentry->d_iname;
 	}
