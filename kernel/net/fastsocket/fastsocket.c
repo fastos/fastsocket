@@ -487,6 +487,8 @@ err1:
 
 static void fsock_d_free(struct dentry *dentry)
 {
+    if (dname_external(dentry))
+        kfree(dentry->d_name.name);
 	kmem_cache_free(dentry_cache, dentry);
 }
 
