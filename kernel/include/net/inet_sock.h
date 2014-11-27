@@ -289,7 +289,8 @@ static inline void inet_rps_record_flow(struct sock *sk)
 	rcu_read_unlock();
 }
 
-static inline void inet_rcs_record_cpu(struct sock *sk) {
+static inline void inet_rcs_record_cpu(struct sock *sk) 
+{
 	sk->sk_affinity = smp_processor_id();
 }
 
