@@ -294,6 +294,15 @@ static inline void inet_rcs_record_cpu(struct sock *sk)
 	sk->sk_affinity = smp_processor_id();
 }
 
+static inline void inet_sock_cpu_or_flow_record(struct sock *sk)
+{
+    //if (enable_receive_cpu_selection)
+    if (sock_flag(sk, SOCK_AFFINITY))
+        inet_rcs_record_cpu(sk);
+    else
+        inet_rps_record_flow(sk);
+}
+
 static inline void inet_rps_reset_flow(struct sock *sk)
 {
 	struct rps_sock_flow_table *sock_flow_table;

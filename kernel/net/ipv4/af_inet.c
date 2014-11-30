@@ -126,15 +126,6 @@ static DEFINE_SPINLOCK(inetsw_lock);
 struct ipv4_config ipv4_config;
 EXPORT_SYMBOL(ipv4_config);
 
-static inline void inet_sock_cpu_or_flow_record(struct sock *sk)
-{
-	//if (enable_receive_cpu_selection)
-	if (sock_flag(sk, SOCK_AFFINITY))
-		inet_rcs_record_cpu(sk);
-	else
-		inet_rps_record_flow(sk);
-}
-
 /* New destruction routine */
 
 void inet_sock_destruct(struct sock *sk)

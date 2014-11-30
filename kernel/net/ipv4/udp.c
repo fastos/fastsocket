@@ -1636,11 +1636,7 @@ unsigned int udp_poll(struct file *file, struct socket *sock, poll_table *wait)
 	unsigned int mask = datagram_poll(file, sock, wait);
 	struct sock *sk = sock->sk;
 
-	//if (enable_receive_cpu_selection)
-	if (sock_flag(sk, SOCK_AFFINITY))
-		inet_rcs_record_cpu(sk);
-	else
-		inet_rps_record_flow(sk);
+	inet_sock_cpu_or_flow_record(sk);
 
 	/* Check for false positives due to checksum errors */
 	if ((mask & POLLRDNORM) && !(file->f_flags & O_NONBLOCK) &&
