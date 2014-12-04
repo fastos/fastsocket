@@ -148,6 +148,10 @@ struct skb_frag_struct {
 	__u32 size;
 };
 
+#define FSOCKET_INVALID_POOL_ID				(-1)
+
+#define IS_FROM_FSOCKET_SKB_POOL(skb) 		((skb)->pool_id >= 0)
+
 static inline unsigned int skb_frag_size(const skb_frag_t *frag)
 {
 	return frag->size;
