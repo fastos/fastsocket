@@ -40,7 +40,7 @@ MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
 MODULE_VERSION("1.0.0");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket applications");
 
-static int enable_fastsocket_debug = 3;
+int enable_fastsocket_debug = 3;
 static int enable_listen_spawn = 2;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
@@ -64,11 +64,6 @@ MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disabled, 1 = Enab
 MODULE_PARM_DESC(enable_direct_tcp, " Control Direct-TCP: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Receive skb pool, 2 = Send skb pool,  3 = Both skb pool");
 MODULE_PARM_DESC(enable_receive_cpu_selection, " Control RCS: 0 = Disabled[Default], 1 = Enabled");
-
-int inline fsocket_get_dbg_level(void)
-{
-	return enable_fastsocket_debug;
-}
 
 #define DISABLE_LISTEN_SPAWN			0
 #define ENABLE_LISTEN_SPAWN_REQUIRED_AFFINITY	1
