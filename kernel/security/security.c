@@ -1045,6 +1045,7 @@ int security_socket_post_create(struct socket *sock, int family,
 	return security_ops->socket_post_create(sock, family, type,
 						protocol, kern);
 }
+EXPORT_SYMBOL(security_socket_post_create);
 
 int security_socket_bind(struct socket *sock, struct sockaddr *address, int addrlen)
 {
@@ -1065,6 +1066,7 @@ int security_socket_accept(struct socket *sock, struct socket *newsock)
 {
 	return security_ops->socket_accept(sock, newsock);
 }
+EXPORT_SYMBOL(security_socket_accept);
 
 int security_socket_sendmsg(struct socket *sock, struct msghdr *msg, int size)
 {
