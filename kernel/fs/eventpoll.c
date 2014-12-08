@@ -1212,12 +1212,6 @@ int ep_insert(struct eventpoll *ep, struct epoll_event *event,
 	if (epi->nwait < 0)
 		goto error_unregister;
 
-	if (!is_file_epoll(tfile)) {
-		error = add_to_tfile_check(&epi->ffd);
-		if (error)
-			goto error_unregister;
-	}
-
 	/* Add the current item to the list of active epoll hook for this file */
 	spin_lock(&tfile->f_lock);
 	list_add_tail_rcu(&epi->fllink, &tfile->f_ep_links);
@@ -1787,7 +1781,9 @@ SYSCALL_DEFINE4(epoll_ctl, int, epfd, int, op, int, fd,
 			}
 		} else
 			error = -EEXIST;
-		clear_tfile_check_list();
+
+		if (full_check)
+			clear_tfile_check_list();
 		break;
 	case EPOLL_CTL_DEL:
 		if (epi) {

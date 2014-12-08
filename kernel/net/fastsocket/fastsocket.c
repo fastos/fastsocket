@@ -40,7 +40,7 @@ MODULE_AUTHOR("Xiaofeng Lin <sina.com.cn>");
 MODULE_VERSION("1.0.0");
 MODULE_DESCRIPTION("Fastsocket which provides scalable and thus high kernel performance for socket applications");
 
-static int enable_fastsocket_debug = 3;
+int enable_fastsocket_debug = 3;
 static int enable_listen_spawn = 2;
 extern int enable_receive_flow_deliver;
 static int enable_fast_epoll = 1;
@@ -64,11 +64,6 @@ MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disabled, 1 = Enab
 MODULE_PARM_DESC(enable_direct_tcp, " Control Direct-TCP: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Receive skb pool, 2 = Send skb pool,  3 = Both skb pool");
 MODULE_PARM_DESC(enable_receive_cpu_selection, " Control RCS: 0 = Disabled[Default], 1 = Enabled");
-
-int inline fsocket_get_dbg_level(void)
-{
-	return enable_fastsocket_debug;
-}
 
 #define DISABLE_LISTEN_SPAWN			0
 #define ENABLE_LISTEN_SPAWN_REQUIRED_AFFINITY	1
@@ -487,6 +482,8 @@ err1:
 
 static void fsock_d_free(struct dentry *dentry)
 {
+    if (dname_external(dentry))
+        kfree(dentry->d_name.name);
 	kmem_cache_free(dentry_cache, dentry);
 }
 
@@ -504,8 +501,10 @@ static struct dentry *fsock_d_alloc(struct socket *sock, struct dentry *parent, 
 
 	if (name->len > DNAME_INLINE_LEN-1) {
 		dname = kmalloc(name->len + 1, GFP_KERNEL);
-		if (!dname)
+		if (!dname) {
+			kmem_cache_free(dentry_cache, dentry);
 			return NULL;
+		}
 	} else {
 		dname = dentry->d_iname;
 	}
@@ -690,7 +689,16 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	if (err < 0) {
 		EPRINTK_LIMIT(ERR, "Initialize Inet Socket failed\n");
 		put_empty_filp(sfile);
+		fsock_free_sock(sock);
+		goto out;
+	}
+
+	err = security_socket_post_create(sock, PF_INET, SOCK_STREAM, IPPROTO_TCP, 0);
+	if (err) {
+		EPRINTK_LIMIT(ERR, "security_socket_post_create failed\n");
+		put_empty_filp(sfile);
 		fsock_release_sock(sock);
+		fsock_free_sock(sock);
 		goto out;
 	}
 
@@ -704,6 +712,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		EPRINTK_LIMIT(ERR, "Spawn listen socket alloc dentry failed\n");
 		put_empty_filp(sfile);
 		fsock_release_sock(sock);
+		fsock_free_sock(sock);
 		goto out;
 	}
 
@@ -737,7 +746,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	if (nfile == NULL) {
 		err = -ENOMEM;
 		EPRINTK_LIMIT(ERR, "Spawn global listen socket alloc file failed\n");
-		__fsocket_filp_close(sfile);
+		__fsocket_filp_close(sfile);		
 		goto out;
 	}
 
@@ -748,7 +757,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		err = -ENOMEM;
 		EPRINTK_LIMIT(ERR, "Spawn listen socket alloc dentry failed\n");
 		put_empty_filp(nfile);
-		__fsocket_filp_close(sfile);
+		__fsocket_filp_close(sfile);		
 		goto out;
 	}
 
@@ -786,6 +795,7 @@ out:
 static int fsocket_socket(int flags)
 {
 	struct socket *sock;
+	int fd;
 
 	int err = 0;
 
@@ -812,13 +822,21 @@ static int fsocket_socket(int flags)
 
 	fsocket_init_socket(sock);
 
-	err = fsock_map_fd(sock, flags);
-	if (err < 0) {
+	fd = fsock_map_fd(sock, flags);
+	if (fd < 0) {
+		err = fd;
 		EPRINTK_LIMIT(ERR, "Map Socket FD failed\n");
 		goto release_sock;
 	}
 
-	goto out;
+	err = security_socket_post_create(sock, PF_INET, SOCK_STREAM, IPPROTO_TCP, 0);
+	if (err) {
+		EPRINTK_LIMIT(ERR, "security_socket_post_create failed\n");
+		fsocket_close(fd);
+		return err;
+	}
+
+	return fd;
 
 release_sock:
 	fsock_release_sock(sock);
@@ -1168,7 +1186,7 @@ static int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	}
 
 	cpu = ret;
-
+	newsock = NULL;
 	ret = fsocket_spawn_clone(fd, sock, &newsock);
 	if (ret < 0) {
 		EPRINTK_LIMIT(ERR, "Clone listen socket failed[%d]\n", ret);
@@ -1347,7 +1365,14 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 	if (unlikely(newfd < 0)) {
 		EPRINTK_LIMIT(ERR, "Allocate file for new socket failed\n");
 		err = newfd;
-		goto out_newfd;
+		fsock_free_sock(newsock);
+		goto out;
+	}
+
+	err = security_socket_accept(sock, newsock);
+	if (err) {	
+		EPRINTK_LIMIT(ERR, "security_socket_accept failed\n");
+		goto out_fd;
 	}
 
 	if (!file->sub_file) {
@@ -1406,8 +1431,6 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 out_fd:
 	__fsocket_filp_close(newfile);
 	put_unused_fd(newfd);
-out_newfd:
-	fsock_free_sock(newsock);
 out:
 	return err;
 }

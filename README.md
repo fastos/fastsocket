@@ -32,7 +32,7 @@ Meanwhile, The underlying kernel optimization of Fastsocket is transparent for
 socket applications, which means existing applications can take advantage of 
 Fastsocket without changing their codes.
 
-Currently Fastsocket is implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6) 
+Currently Fastsocket is implemented in the Linux kernel(kernel-2.6.32-431.17.1.el6.x86_64) 
 of CentOS-6.5 which is the latest version of redhat EL6, 
 since CentOS-6.5 is our major production environment system. 
 According to our evaluations, Fastsocket increases throughput of Nginx and
@@ -78,7 +78,8 @@ Here is a brief introduction to the directories in the repository.
 
 The following commands will build and install the kernel after Fastsocket repository
 is downloaded from git. You can customize the config file if you are sure you will 
-not miss some important component.
+not miss some important component. Fastsocket can be built smoothly on 64-bit CentOS-6.X systems.
+Problems may arise on 32-bit systems and CentOS-7 systems.
 
 	[root@localhost ~]# cd fastsocket/kernel
 	[root@localhost kernel]# make defconfig
@@ -242,7 +243,7 @@ As mentioned before, Fastsocket has already been deployed in the SINA production
 environment. One typical scenario is using Fastsocket with HAProxy to provide 
 HTTP load balance service to WEIBO and other SINA productions.
 
-In the figure below, it is the CPU utilization of a 8-core servers within 24 hours. 
+In the figure below, it is the CPU utilization of an 8-core servers within 24 hours. 
 Figure (a) shows the CPU utilization before deploying Fastsocket and figure (b)
 shows the CPU utilization after deploying Fastsocket.
 

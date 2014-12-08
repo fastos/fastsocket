@@ -25,7 +25,13 @@
 #define INFO 0x03
 #define DEBUG 0x04
 
-extern int fsocket_get_dbg_level(void);
+static int inline fsocket_get_dbg_level(void)
+{
+	//Declare the global variable inside this function to hide this varaible
+	extern int enable_fastsocket_debug;
+	
+	return enable_fastsocket_debug;
+}
 
 DEFINE_RATELIMIT_STATE(fastsocket_ratelimit_state, 5 * HZ, 10);
 

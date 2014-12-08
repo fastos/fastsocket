@@ -2684,26 +2684,42 @@ static const struct file_operations rcs_lookup_seq_fops = {
 static __net_init int proto_init_net(struct net *net)
 {
 	if (!proc_net_fops_create(net, "protocols", S_IRUGO, &proto_seq_fops))
-		return -ENOMEM;
-
-	if (!proc_net_fops_create(net, "sock_lookup", S_IRUGO, &sock_lookup_seq_fops))
-		return -ENOMEM;
-	if (!proc_net_fops_create(net, "rcs_lookup", S_IRUGO, &rcs_lookup_seq_fops))
-		return -ENOMEM;
+	    goto err1;
+	
 	sock_lookup_stats = alloc_percpu(struct sock_lookup_stat);
 	if (!sock_lookup_stats)
-		return -ENOMEM;
+		goto err2;
 	rcs_lookup_stats = alloc_percpu(struct rcs_lookup_stat);
 	if (!rcs_lookup_stats)
-		return -ENOMEM;
+		goto err3;
+
+	if (!proc_net_fops_create(net, "sock_lookup", S_IRUGO, &sock_lookup_seq_fops))
+		goto err4;
+	if (!proc_net_fops_create(net, "rcs_lookup", S_IRUGO, &rcs_lookup_seq_fops))
+		goto err5;
 
 	return 0;
+
+err5:
+    proc_net_remove(net, "sock_lookup");
+err4:
+    free_percpu(rcs_lookup_stats);
+err3:
+    free_percpu(sock_lookup_stats);
+err2:
+    proc_net_remove(net, "protocols");
+err1:
+    return -ENOMEM;
 }
 
 static __net_exit void proto_exit_net(struct net *net)
 {
 	proc_net_remove(net, "protocols");
 	proc_net_remove(net, "sock_lookup");
+	proc_net_remove(net, "rcs_lookup");
+
+	free_percpu(sock_lookup_stats);
+	free_percpu(rcs_lookup_stats);
 }
 
 

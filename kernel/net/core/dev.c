@@ -3653,11 +3653,10 @@ EXPORT_SYMBOL(rps_unregister);
 
 static int netif_rps_process(struct sk_buff *skb)
 {
-	int ret;
+	int ret = -1;
 
 	/* Only support IPV4 */
 	if (skb->protocol != htons(ETH_P_IP)) {
-		ret = -1;
 		goto out;
 	}
 

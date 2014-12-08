@@ -306,10 +306,10 @@ init:
 	/* make sure we initialize shinfo sequentially */
 	shinfo = skb_shinfo(skb);
 	atomic_set(&shinfo->dataref, 1);
-	if (skb->pool_id >= 0)
+	if (IS_FROM_FSOCKET_SKB_POOL(skb))
 		shinfo->pool_id = skb->pool_id;
 	else
-		shinfo->pool_id = -1;
+		shinfo->pool_id = FSOCKET_INVALID_POOL_ID;
 	shinfo->nr_frags  = 0;
 	shinfo->gso_size = 0;
 	shinfo->gso_segs = 0;
@@ -526,7 +526,7 @@ static void skb_release_data(struct sk_buff *skb)
 		if (skb_has_frag_list(skb))
 			skb_drop_fraglist(skb);
 
-		if (skb_shinfo(skb)->pool_id >= 0) {
+		if (IS_FROM_FSOCKET_SKB_POOL(skb_shinfo(skb))) {
 			DPRINTK("Reserve data[%d] 0x%p for skb[%d] 0x%p\n", skb_shinfo(skb)->pool_id, skb->head, skb->pool_id, skb);
 			return;
 		}
@@ -594,7 +594,7 @@ static void kfree_skbmem(struct sk_buff *skb)
 
 	switch (skb->fclone) {
 	case SKB_FCLONE_UNAVAILABLE:
-		if (skb->pool_id >= 0) {
+		if (IS_FROM_FSOCKET_SKB_POOL(skb)) {
 			kfree_pool_skb(skb);
 		} else {
 			DPRINTK("Free regular skb[%d] 0x%p\n", skb->pool_id, skb);
@@ -606,7 +606,7 @@ static void kfree_skbmem(struct sk_buff *skb)
 		fclone_ref = (atomic_t *) (skb + 2);
 		DPRINTK("Try to free origin skb[%d] 0x%p\n", skb->pool_id, skb);
 		if (atomic_dec_and_test(fclone_ref)) {
-			if (skb->pool_id >= 0)
+			if (IS_FROM_FSOCKET_SKB_POOL(skb))
 				kfree_pool_skb_clone(skb);
 			else {
 				DPRINTK("Free regular original skb[%d] 0x%p\n", skb->pool_id, skb);
@@ -627,7 +627,7 @@ static void kfree_skbmem(struct sk_buff *skb)
 		DPRINTK("Try to free clone skb[%d] 0x%p with original skb[%d] 0x%p\n",
 				skb->pool_id, skb, other->pool_id, other);
 		if (atomic_dec_and_test(fclone_ref)) {
-			if (skb->pool_id >= 0)
+			if (IS_FROM_FSOCKET_SKB_POOL(skb))
 				kfree_pool_skb_clone(other);
 			else {
 				DPRINTK("Free regular clone skb[%d] 0x%p through original skb[%d] 0x%p\n",
@@ -963,12 +963,12 @@ struct sk_buff *skb_clone(struct sk_buff *skb, gfp_t gfp_mask)
 		kmemcheck_annotate_bitfield(n, flags2);
 		n->fclone = SKB_FCLONE_UNAVAILABLE;
 
-		if (skb_shinfo(skb)->pool_id >= 0) {
+		if (IS_FROM_FSOCKET_SKB_POOL(skb_shinfo(skb))) {
 			unsigned char *data = kmalloc_node(MAX_FASTSOCKET_SKB_RAW_SIZE, GFP_ATOMIC, cpu_to_node(skb_shinfo(skb)->pool_id));
 
 			/* For pool skb, after being cloned, the skb data needs to be reloaded. */
 			/* Mark the pool_id -1, therefore it would be released in skb_release_data. */
-			skb_shinfo(skb)->pool_id = -1;
+			skb_shinfo(skb)->pool_id = FSOCKET_INVALID_POOL_ID;
 			skb->data_cache = data;
 
 			DPRINTK("Reload data[%d] 0x%p with data 0x%p for old pool skb[%d] 0x%p from %pS\n", skb_shinfo(skb)->pool_id, skb->data_cache, data, skb->pool_id, skb, __builtin_return_address(0));
@@ -1176,7 +1176,7 @@ int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,
 	}
 
 	if (fastpath) {
-		if (skb_shinfo(skb)->pool_id < 0) {
+		if (!IS_FROM_FSOCKET_SKB_POOL(skb_shinfo(skb))) {
 			DPRINTK("Free data[%d] 0x%p for regular skb[%d] 0x%p\n", skb_shinfo(skb)->pool_id, skb->head, skb->pool_id, skb);
 			kfree(skb->head);
 		}
@@ -1219,7 +1219,7 @@ int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,
 	skb->nohdr    = 0;
 	atomic_set(&skb_shinfo(skb)->dataref, 1);
 	/* Initialize new data pool_id */
-	skb_shinfo(skb)->pool_id = -1;
+	skb_shinfo(skb)->pool_id = FSOCKET_INVALID_POOL_ID;
 	return 0;
 
 nofrags:
@@ -3252,7 +3252,7 @@ static inline void skb_init_pool_id(void *foo)
 {
 	struct sk_buff *skb = (struct sk_buff *)foo;
 
-	skb->pool_id = -1;
+	skb->pool_id = FSOCKET_INVALID_POOL_ID;
 }
 
 static inline void skb_init_pool_id_clone(void *foo)
@@ -3262,7 +3262,7 @@ static inline void skb_init_pool_id_clone(void *foo)
 	skb = (struct sk_buff *)foo;
 	cskb = skb + 1;
 
-	skb->pool_id = cskb->pool_id = -1;
+	skb->pool_id = cskb->pool_id = FSOCKET_INVALID_POOL_ID;
 }
 
 void __init skb_init(void)
