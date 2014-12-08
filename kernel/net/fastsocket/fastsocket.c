@@ -697,6 +697,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	if (err) {
 		EPRINTK_LIMIT(ERR, "security_socket_post_create failed\n");
 		put_empty_filp(sfile);
+		fsock_release_sock(sock);
 		fsock_free_sock(sock);
 		goto out;
 	}
@@ -831,7 +832,8 @@ static int fsocket_socket(int flags)
 	err = security_socket_post_create(sock, PF_INET, SOCK_STREAM, IPPROTO_TCP, 0);
 	if (err) {
 		EPRINTK_LIMIT(ERR, "security_socket_post_create failed\n");
-		goto release_sock;
+		fsocket_close(fd);
+		return err;
 	}
 
 	return fd;
@@ -1368,8 +1370,10 @@ static int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sock
 	}
 
 	err = security_socket_accept(sock, newsock);
-	if (err)
-		goto out;
+	if (err) {	
+		EPRINTK_LIMIT(ERR, "security_socket_accept failed\n");
+		goto out_fd;
+	}
 
 	if (!file->sub_file) {
 		DPRINTK(DEBUG, "File 0x%p has no sub file, Do common accept\n", file);
