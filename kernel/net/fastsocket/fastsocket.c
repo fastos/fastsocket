@@ -102,7 +102,9 @@ static void fastsock_destroy_inode(struct inode *inode)
 {
 	DPRINTK(DEBUG, "Free inode 0x%p\n", inode);
 
-	security_inode_free(inode);
+	if (S_ISSOCK(inode->i_mode)) {
+		security_inode_free(inode);
+	}
 	fsock_release_sock(INODE_SOCKET(inode));
 	fsock_free_sock(INODE_SOCKET(inode));
 }
