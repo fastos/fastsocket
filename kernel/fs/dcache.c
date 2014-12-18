@@ -212,11 +212,11 @@ static struct dentry *d_kill(struct dentry *dentry)
  * no dcache lock, please.
  */
 
-void dput_fastsocket(struct dentry *dentry)
+static void dput_fastsocket(struct dentry *dentry)
 {
 	struct inode *inode;
 
-	if (!dentry || !atomic_dec_and_test(&dentry->d_count)) {
+	if (!atomic_dec_and_test(&dentry->d_count)) {
 		return;
 	}
 
@@ -226,7 +226,6 @@ void dput_fastsocket(struct dentry *dentry)
 
 	d_free(dentry);
 }
-EXPORT_SYMBOL(dput_fastsocket);
 
 void dput(struct dentry *dentry)
 {
