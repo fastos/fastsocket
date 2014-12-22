@@ -42,11 +42,6 @@ struct fsocket_stats {
 	u32 sock_free;
 };
 
-struct fsocket_alloc {
-	struct socket socket;
-	struct inode vfs_inode;
-};
-
 extern struct kmem_cache *dentry_cache;
 extern int inet_create(struct net *net, struct socket *sock, int protocol, int kern);
 
@@ -55,16 +50,6 @@ static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 static struct kmem_cache *fsocket_cachep;
 
 /*****************************************************************************************************/
-static inline struct inode *SOCKET_INODE(struct socket *socket)
-{
-	return &container_of(socket, struct fsocket_alloc, socket)->vfs_inode;
-}
-
-static inline struct socket *INODE_SOCKET(struct inode *inode)
-{
-	return &container_of(inode, struct socket_alloc, vfs_inode)->socket;
-}
-
 static inline void fsock_release_sock(struct socket *sock)
 {
 	if (sock->ops) {
@@ -1230,11 +1215,11 @@ int fsocket_init(void)
 {
 	int ret;
 
-	fsocket_cachep = kmem_cache_create("fastsocket_socket_cache", sizeof(struct fsocket_alloc), 0,
+	fsocket_cachep = kmem_cache_create("fsocket_socket_cache", sizeof(struct socket_alloc), 0,
 			SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT |
 			SLAB_MEM_SPREAD | SLAB_PANIC, init_once);
 	if (!fsocket_cachep) {
-		EPRINTK_LIMIT(ERR, "Allocate fastsocket cachep failed\n");
+		EPRINTK_LIMIT(ERR, "Allocate fsocket cachep failed\n");
 		ret = -ENOMEM;
 		goto err1;
 	}
@@ -1635,7 +1620,7 @@ out_unlock:
 
 struct inode *fsocket_alloc_inode(struct super_block *sb)
 {
-	struct fsocket_alloc *ei;
+	struct socket_alloc *ei;
 	struct fsocket_stats *stats = &__get_cpu_var(fsocket_stats);
 
 	ei = kmem_cache_alloc(fsocket_cachep, GFP_KERNEL);
@@ -1670,7 +1655,7 @@ void fsocket_destroy_inode(struct inode *inode)
 	if (S_ISSOCK(inode->i_mode)) {
 		security_inode_free(inode);
 	}
-	fsock_release_sock(INODE_SOCKET(inode));
-	fsock_free_sock(INODE_SOCKET(inode));
+	fsock_release_sock(SOCKET_I(inode));
+	fsock_free_sock(SOCKET_I(inode));
 }
 
