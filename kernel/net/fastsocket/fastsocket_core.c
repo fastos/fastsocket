@@ -45,6 +45,18 @@ struct fsocket_stats {
 extern struct kmem_cache *dentry_cache;
 extern int inet_create(struct net *net, struct socket *sock, int protocol, int kern);
 
+extern unsigned int sock_poll(struct file *file, poll_table *wait);
+extern ssize_t sock_sendpage(struct file *file, struct page *page,
+		int offset, size_t size, loff_t *ppos, int more);
+extern ssize_t generic_splice_sendpage(struct pipe_inode_info *pipe,
+		struct file *out, loff_t *ppos, size_t len, unsigned int flags);
+extern ssize_t sock_splice_read(struct file *file, loff_t *ppos,
+		struct pipe_inode_info *pipe, size_t len, unsigned int flags);
+extern ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos);
+extern ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
+		unsigned long nr_segs, loff_t pos);
+
 static DEFINE_PER_CPU(struct fsocket_stats, fsocket_stats);
 static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 static struct kmem_cache *fsocket_cachep;
@@ -67,17 +79,6 @@ static inline void fsock_free_sock(struct socket *sock)
 	++stats->sock_free;
 
 	module_put(THIS_MODULE);
-}
-
-static inline unsigned int fast_sock_poll(struct file *file, poll_table *wait)
-{
-	struct socket *sock;
-
-	sock = (struct socket *)file->private_data;
-	if (sock && sock->ops && sock->ops->poll)
-		return sock->ops->poll(file, sock, wait);
-
-	return -EINVAL;
 }
 
 static int __fsocket_filp_close(struct file *file)
@@ -141,125 +142,61 @@ static inline int fsocket_filp_close(struct file *file)
 	return 0;
 }
 
-static inline int fast_sock_close(struct inode *i_node, struct file *file)
+static inline int fsock_close(struct inode *i_node, struct file *file)
 {
-	DPRINTK(DEBUG, "Enter fast_sock_close, inode(%p) file(%p)\n", i_node, file);
+	DPRINTK(DEBUG, "Enter fsock_close, inode(%p) file(%p)\n", i_node, file);
 
 	return fsocket_filp_close(file);
 }
 
-loff_t fast_sock_llseek(struct file *file, loff_t offset, int origin)
-{
-	return -ESPIPE;
-}
-
-static int fast_sock_open(struct inode *irrelevant, struct file *dontcare)
+static int fsock_no_open(struct inode *irrelevant, struct file *dontcare)
 {
 	return -ENXIO;
 }
 
-extern ssize_t sock_aio_read(struct kiocb *iocb, const struct iovec *iov,
-		unsigned long nr_segs, loff_t pos);
-
-extern ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
-		unsigned long nr_segs, loff_t pos);
-
-static inline ssize_t fast_sock_read(struct kiocb *iocb, const struct iovec *iov,
-		unsigned long nr_segs, loff_t pos)
+static long fsock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 {
-	ssize_t ret;
-	ret = sock_aio_read(iocb, iov, nr_segs, pos);
-	DPRINTK(DEBUG, "Read %ld\n", ret);
-	return ret;
-}
-
-static inline ssize_t fast_sock_write(struct kiocb *iocb, const struct iovec *iov,
-		unsigned long nr_segs, loff_t pos)
-{
-	ssize_t ret;
-	ret = sock_aio_write(iocb, iov, nr_segs, pos);
-	DPRINTK(DEBUG, "Write %ld\n", ret);
-	return ret;
-}
-
-static inline long fast_sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
-{
-	DPRINTK(INFO, "Do!\n");
-	return -EINVAL;
+   DPRINTK(INFO, "Do!\n");
+   return -EINVAL;
 }
 
 #ifdef CONFIG_COMPAT
-static inline long fast_compate_sock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
+static long compat_fsock_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 {
-	DPRINTK(INFO, "Do!\n");
-	return -EINVAL;
+   DPRINTK(INFO, "Do!\n");
+   return -EINVAL;
 }
 #endif
 
-static inline int fast_sock_mmap(struct file *file, struct vm_area_struct *vma)
+static int fsock_mmap(struct file *file, struct vm_area_struct *vma)
 {
 	DPRINTK(INFO, "Do!\n");
 	return -EINVAL;
 }
 
-static inline int fast_sock_fasync(int fd, struct file *filp, int on)
+static int fsock_fasync(int fd, struct file *filp, int on)
 {
 	DPRINTK(INFO, "Do!\n");
 	return -EINVAL;
 }
 
-extern ssize_t sock_sendpage(struct file *file, struct page *page,
-		int offset, size_t size, loff_t *ppos, int more);
-
-static inline ssize_t fast_sock_sendpage(struct file *file, struct page *page,
-		int offset, size_t size, loff_t *ppos, int more)
-{
-	ssize_t ret;
-	ret = sock_sendpage(file, page, offset, size, ppos, more);
-	DPRINTK(DEBUG, "Send page %ld\n", ret);
-	return ret;
-}
-
-extern ssize_t generic_splice_sendpage(struct pipe_inode_info *pipe,
-		struct file *out, loff_t *ppos, size_t len, unsigned int flags);
-extern ssize_t sock_splice_read(struct file *file, loff_t *ppos,
-		struct pipe_inode_info *pipe, size_t len, unsigned int flags);
-
-static inline ssize_t fast_sock_splice_write(struct pipe_inode_info *pipe,
-		struct file *out, loff_t *ppos, size_t len, unsigned int flags)
-{
-	ssize_t ret;
-	ret = generic_splice_sendpage(pipe, out, ppos, len, flags);
-	DPRINTK(DEBUG, "Splice wirte %ld\n", ret);
-	return ret;
-}
-
-static inline ssize_t fast_sock_splice_read(struct file *file, loff_t *ppos,
-		struct pipe_inode_info *pipe, size_t len, unsigned int flags)
-{
-	ssize_t ret;
-	ret = sock_splice_read(file, ppos, pipe, len, flags);
-	DPRINTK(DEBUG, "Splice read %ld\n", ret);
-	return ret;
-}
-
-static const struct file_operations socket_file_ops = {
+static const struct file_operations fsocket_file_ops = {
 	.owner = 	THIS_MODULE,
-	.llseek =	fast_sock_llseek,
-	.aio_read = 	fast_sock_read,
-	.aio_write =	fast_sock_write,
-	.poll =		fast_sock_poll,
-	.unlocked_ioctl = fast_sock_ioctl,
+	.llseek =	no_llseek,
+	.aio_read = 	sock_aio_read,
+	.aio_write =	sock_aio_write,
+	.poll =		sock_poll,
+	.unlocked_ioctl = fsock_ioctl,
 #ifdef CONFIG_COMPAT
-	.compat_ioctl = fast_compate_sock_ioctl,
+	.compat_ioctl = compat_fsock_ioctl,
 #endif
-	.mmap =		fast_sock_mmap,
-	.open =		fast_sock_open,	/* special open code to disallow open via /proc */
-	.release =	fast_sock_close,
-	.fasync =	fast_sock_fasync,
-	.sendpage =	fast_sock_sendpage,
-	.splice_write = fast_sock_splice_write,
-	.splice_read =	fast_sock_splice_read,
+	.mmap =		fsock_mmap,
+	.open =		fsock_no_open,	/* special open code to disallow open via /proc */
+	.release =	fsock_close,
+	.fasync =	fsock_fasync,
+	.sendpage =	sock_sendpage,
+	.splice_write = generic_splice_sendpage,
+	.splice_read =	sock_splice_read,
 };
 
 static char *fastsockfs_dynamic_dname(struct dentry *dentry, char *buffer, int buflen,
@@ -296,75 +233,6 @@ static void __put_unused_fd(struct files_struct *files, unsigned int fd)
 	__FD_CLR(fd, fdt->open_fds);
 	if (fd < files->next_fd)
 		files->next_fd = fd;
-}
-
-#define FSOCKET_INODE_START	( 1 << 12 )
-
-static struct socket *fsocket_alloc_socket(void)
-{
-	static const struct inode_operations empty_iops;
-	static const struct file_operations empty_fops;
-	struct socket *sock;
-	//FIXME: Just guess this inode number is not something really matters.
-	static unsigned int last_ino = FSOCKET_INODE_START;
-	struct inode *inode = NULL;	
-	struct fsocket_stats *stats = &__get_cpu_var(fsocket_stats);
-
-	sock = (struct socket *)kmem_cache_alloc(fsocket_cachep, GFP_KERNEL);
-	if (!sock) {
-		DPRINTK(ERR, "Fail to allocate sock\n");
-		goto err1;
-	}
-	
-	if(!try_module_get(THIS_MODULE)) {
-		goto err2;
-	}
-	
-	if (security_inode_alloc(SOCK_INODE(sock))) {
-		goto err3;
-	}
-	
-	init_waitqueue_head(&sock->wait);
-	
-	sock->fasync_list = NULL;
-	sock->state = SS_UNCONNECTED;
-	sock->flags = 0;
-	sock->ops = NULL;
-	sock->sk = NULL;
-	sock->file = NULL;
-	
-	sock->type = 0;
-	
-	inode = SOCK_INODE(sock);
-	
-	inode->i_op = &empty_iops;
-	inode->i_fop = &empty_fops;
-	inode->i_sb = fastsocket_mnt->mnt_sb;
-	atomic_set(&inode->i_count, 1);
-	
-	INIT_LIST_HEAD(&inode->i_list);
-	INIT_LIST_HEAD(&inode->i_sb_list);
-	
-	inode->i_ino = ++last_ino;
-	inode->i_state = 0;
-	
-	kmemcheck_annotate_bitfield(sock, type);
-	inode->i_mode = S_IFSOCK | S_IRWXUGO;
-	inode->i_uid = current_fsuid();
-	inode->i_gid = current_fsgid();
-	
-	++stats->sock_alloc;
-	
-	DPRINTK(DEBUG, "Allocat inode 0x%p\n", inode);
-
-	return sock;
-	
-err3:
-	module_put(THIS_MODULE);
-err2:
-	kmem_cache_free(fsocket_cachep, sock);
-err1:
-	return NULL;
 }
 
 #define DNAME_INLINE_LEN (sizeof(struct dentry)-offsetof(struct dentry,d_iname))
@@ -456,7 +324,7 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 
 	path.mnt = fastsocket_mnt;
 
-	SOCK_INODE(sock)->i_fop = &socket_file_ops;
+	SOCK_INODE(sock)->i_fop = &fsocket_file_ops;
 
 	file = get_empty_filp();
 	if (unlikely(!file)) {
@@ -473,7 +341,7 @@ static int fsock_alloc_file(struct socket *sock, struct file **f, int flags)
 	file->f_mode = FMODE_READ | FMODE_WRITE | FMODE_FASTSOCKET;
 	if (enable_fast_epoll)
 		file->f_mode |= FMODE_BIND_EPI;
-	file->f_op = &socket_file_ops;
+	file->f_op = &fsocket_file_ops;
 
 	sock->file = file;
 
@@ -501,6 +369,76 @@ static int fsock_map_fd(struct socket *sock, int flags)
 
 	return fd;
 }
+
+static struct socket *fsocket_alloc_socket(void)
+{
+#define FSOCKET_INODE_START	( 1 << 12 )
+
+	static const struct inode_operations empty_iops;
+	static const struct file_operations empty_fops;
+	struct socket *sock;
+	//FIXME: Just guess this inode number is not something really matters.
+	static unsigned int last_ino = FSOCKET_INODE_START;
+	struct inode *inode = NULL;	
+	struct fsocket_stats *stats = &__get_cpu_var(fsocket_stats);
+
+	sock = (struct socket *)kmem_cache_alloc(fsocket_cachep, GFP_KERNEL);
+	if (!sock) {
+		DPRINTK(ERR, "Fail to allocate sock\n");
+		goto err1;
+	}
+	
+	if(!try_module_get(THIS_MODULE)) {
+		goto err2;
+	}
+	
+	if (security_inode_alloc(SOCK_INODE(sock))) {
+		goto err3;
+	}
+	
+	init_waitqueue_head(&sock->wait);
+	
+	sock->fasync_list = NULL;
+	sock->state = SS_UNCONNECTED;
+	sock->flags = 0;
+	sock->ops = NULL;
+	sock->sk = NULL;
+	sock->file = NULL;
+	
+	sock->type = 0;
+	
+	inode = SOCK_INODE(sock);
+	
+	inode->i_op = &empty_iops;
+	inode->i_fop = &empty_fops;
+	inode->i_sb = fastsocket_mnt->mnt_sb;
+	atomic_set(&inode->i_count, 1);
+	
+	INIT_LIST_HEAD(&inode->i_list);
+	INIT_LIST_HEAD(&inode->i_sb_list);
+	
+	inode->i_ino = ++last_ino;
+	inode->i_state = 0;
+	
+	kmemcheck_annotate_bitfield(sock, type);
+	inode->i_mode = S_IFSOCK | S_IRWXUGO;
+	inode->i_uid = current_fsuid();
+	inode->i_gid = current_fsgid();
+	
+	++stats->sock_alloc;
+	
+	DPRINTK(DEBUG, "Allocat inode 0x%p\n", inode);
+
+	return sock;
+	
+err3:
+	module_put(THIS_MODULE);
+err2:
+	kmem_cache_free(fsocket_cachep, sock);
+err1:
+	return NULL;
+}
+
 
 static void fsocket_init_socket(struct socket *sock)
 {
@@ -610,7 +548,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 
 	path.mnt = fastsocket_mnt;
 
-	SOCK_INODE(sock)->i_fop = &socket_file_ops;
+	SOCK_INODE(sock)->i_fop = &fsocket_file_ops;
 
 	sfile->f_path = path;
 	sfile->f_mapping = NULL;
