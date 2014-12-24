@@ -979,6 +979,14 @@ int filp_close(struct file *filp, fl_owner_t id)
 		return 0;
 	}
 
+	/*
+	When the process is killed by kernel, the close call will not be injected by fastsocket.
+	As a result, the fast socket will reach here. So we need to check if it is the fast socket.
+	*/
+	if (filp->f_mode & FMODE_FASTSOCKET && filp->f_op && filp->f_op->release) {
+		return filp->f_op->release(NULL, filp);
+	}
+
 	if (filp->f_op && filp->f_op->flush)
 		retval = filp->f_op->flush(filp, id);
 
