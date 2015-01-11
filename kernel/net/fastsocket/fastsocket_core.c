@@ -37,9 +37,31 @@
 #define ENABLE_LISTEN_SPAWN_REQUIRED_AFFINITY	1
 #define ENABLE_LISTEN_SPAWN_AUTOSET_AFFINITY	2
 
+enum {
+	FSOCKET_STATS_SOCK_ALLOC,
+	FSOCKET_STATS_SOCK_FREE,
+	FSOCKET_STATS_SOCK_IN_POOL,
+	FSOCKET_STATS_SOCK_POOL_LOCK,
+
+	FSOCKET_STATS_NR
+};
+
 struct fsocket_stats {
-	u32 sock_alloc;
-	u32 sock_free;
+	u32 stats[FSOCKET_STATS_NR];
+};
+
+struct fsocket_pool {
+	struct list_head free_list;
+	struct list_head backlog_list;
+	spinlock_t backlog_lock;
+	u32 free_cnt;
+	u32 backlog_cnt;
+};
+
+struct fsocket_alloc {
+	struct socket_alloc sock_alloc;
+	struct list_head next;
+	int cpu_id;
 };
 
 extern struct kmem_cache *dentry_cache;
@@ -58,10 +80,35 @@ extern ssize_t sock_aio_write(struct kiocb *iocb, const struct iovec *iov,
 		unsigned long nr_segs, loff_t pos);
 
 static DEFINE_PER_CPU(struct fsocket_stats, fsocket_stats);
+static DEFINE_PER_CPU(struct fsocket_pool, fsocket_pool);
 static DEFINE_PER_CPU(unsigned int, global_spawn_accept) = 0;
 static struct kmem_cache *fsocket_cachep;
+static struct kmem_cache *fsocket_pool_cachep;
 
 /*****************************************************************************************************/
+#define FSOCKET_INC_STATS(stats_type) \
+	do { \
+		struct fsocket_stats *fstats = &__get_cpu_var(fsocket_stats); \
+		++fstats->stats[stats_type]; \
+	} while (0)
+#define FSOCKET_DEC_STATS(stats_type) \
+	do { \
+		struct fsocket_stats *fstats = &__get_cpu_var(fsocket_stats); \
+		--fstats->stats[stats_type]; \
+	} while (0)
+
+#define FSOCKET_INC_CPU_STATS(cpu, stats_type) \
+	do { \
+		struct fsocket_stats *fstats = &per_cpu(fsocket_stats, cpu); \
+		++fstats->stats[stats_type]; \
+	} while (0)
+#define FSOCKET_DEC_CPU_STATS(cpu, stats_type) \
+	do { \
+		struct fsocket_stats *fstats = &per_cpu(fsocket_stats, cpu); \
+		--fstats->stats[stats_type]; \
+	} while (0)
+	
+
 static inline void fsock_release_sock(struct socket *sock)
 {
 	if (sock->ops) {
@@ -71,12 +118,97 @@ static inline void fsock_release_sock(struct socket *sock)
 	}
 }
 
-static inline void fsock_free_sock(struct socket *sock)
+static struct socket_alloc *fsocket_alloc_socket_mem(void)
 {
-	struct fsocket_stats *stats = &__get_cpu_var(fsocket_stats);
+	struct socket_alloc *socket;
 
-	kmem_cache_free(fsocket_cachep, sock);
-	++stats->sock_free;
+	if (enable_socket_pool_size) {
+		struct fsocket_pool *fsock_pool = &__get_cpu_var(fsocket_pool);
+		struct fsocket_alloc *fsock_alloc = NULL;
+
+		preempt_disable();
+		if (fsock_pool->free_cnt) {
+			fsock_alloc = list_first_entry(&fsock_pool->free_list, struct fsocket_alloc, next);
+			list_del(&fsock_alloc->next);
+			fsock_pool->free_cnt--;
+		}
+		preempt_enable_no_resched();
+
+		if (likely(fsock_alloc)) {
+			goto alloc_from_pool;
+		}
+
+		if (fsock_pool->backlog_cnt) {			
+			spin_lock(&fsock_pool->backlog_lock);
+			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_POOL_LOCK);
+			if (fsock_pool->backlog_cnt) {
+				list_splice_init(&fsock_pool->backlog_list, &fsock_pool->free_list);
+				fsock_pool->free_cnt = fsock_pool->backlog_cnt;
+				fsock_pool->backlog_cnt = 0;
+				
+				fsock_alloc = list_first_entry(&fsock_pool->free_list, struct fsocket_alloc, next);
+				list_del(&fsock_alloc->next);
+				fsock_pool->free_cnt--;
+			}
+			spin_unlock(&fsock_pool->backlog_lock);
+		}
+
+		if (fsock_alloc) {
+			goto alloc_from_pool;
+		}
+
+		fsock_alloc = kmem_cache_alloc(fsocket_pool_cachep, GFP_KERNEL);
+		if (likely(fsock_alloc)) {
+			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ALLOC);
+			return &fsock_alloc->sock_alloc;
+		}
+
+		return NULL;
+
+alloc_from_pool:
+		FSOCKET_DEC_STATS(FSOCKET_STATS_SOCK_IN_POOL);
+		return &fsock_alloc->sock_alloc;
+	} else {
+		socket = kmem_cache_alloc(fsocket_cachep, GFP_KERNEL);
+		if (likely(socket)) {
+			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ALLOC);
+		}
+		
+		return socket;
+	}
+}
+
+static inline void fsocket_free_socket_mem(struct socket_alloc *sock_alloc)
+{
+	if (enable_socket_pool_size) {
+		struct fsocket_alloc *fsock = (struct fsocket_alloc *)sock_alloc;
+		struct fsocket_pool *fsock_pool = &per_cpu(fsocket_pool, fsock->cpu_id);
+		int cpu = smp_processor_id();
+
+		if (fsock_pool->free_cnt+fsock_pool->backlog_cnt >= enable_socket_pool_size) {
+			kmem_cache_free(fsocket_pool_cachep, fsock);
+			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_FREE);
+		} else {
+			if (fsock->cpu_id == cpu) {
+				FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_IN_POOL);
+				preempt_disable();
+				list_add(&fsock->next, &fsock_pool->free_list);
+				fsock_pool->free_cnt++;
+				preempt_enable_no_resched();
+			} else {				
+				FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_POOL_LOCK);
+				spin_lock(&fsock_pool->backlog_lock);
+				list_add(&fsock->next, &fsock_pool->backlog_list);
+				fsock_pool->backlog_cnt++;
+				FSOCKET_INC_CPU_STATS(fsock->cpu_id, FSOCKET_STATS_SOCK_IN_POOL);
+				spin_unlock(&fsock_pool->backlog_lock);
+			}
+		}			
+	} else {		
+		kmem_cache_free(fsocket_cachep, sock_alloc);
+		
+		FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_FREE);
+	}
 
 	module_put(THIS_MODULE);
 }
@@ -380,20 +512,17 @@ static struct socket *fsocket_alloc_socket(void)
 	//FIXME: Just guess this inode number is not something really matters.
 	static unsigned int last_ino = FSOCKET_INODE_START;
 	struct inode *inode = NULL;	
-	struct fsocket_stats *stats = &__get_cpu_var(fsocket_stats);
 
-	sock = (struct socket *)kmem_cache_alloc(fsocket_cachep, GFP_KERNEL);
+	sock = (struct socket *)fsocket_alloc_socket_mem();
 	if (!sock) {
 		DPRINTK(ERR, "Fail to allocate sock\n");
 		goto err1;
 	}
 	
-	if(!try_module_get(THIS_MODULE)) {
-		goto err2;
-	}
+	__module_get(THIS_MODULE);
 	
 	if (security_inode_alloc(SOCK_INODE(sock))) {
-		goto err3;
+		goto err2;
 	}
 	
 	init_waitqueue_head(&sock->wait);
@@ -424,17 +553,15 @@ static struct socket *fsocket_alloc_socket(void)
 	inode->i_mode = S_IFSOCK | S_IRWXUGO;
 	inode->i_uid = current_fsuid();
 	inode->i_gid = current_fsgid();
+
 	
-	++stats->sock_alloc;
 	
 	DPRINTK(DEBUG, "Allocat inode 0x%p\n", inode);
 
 	return sock;
 	
-err3:
-	module_put(THIS_MODULE);
 err2:
-	kmem_cache_free(fsocket_cachep, sock);
+	fsocket_free_socket_mem((struct socket_alloc*)sock);
 err1:
 	return NULL;
 }
@@ -519,7 +646,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 	if (err < 0) {
 		EPRINTK_LIMIT(ERR, "Initialize Inet Socket failed\n");
 		put_empty_filp(sfile);
-		fsock_free_sock(sock);
+		fsocket_free_socket_mem((struct socket_alloc*)sock);
 		goto out;
 	}
 
@@ -528,7 +655,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		EPRINTK_LIMIT(ERR, "security_socket_post_create failed\n");
 		put_empty_filp(sfile);
 		fsock_release_sock(sock);
-		fsock_free_sock(sock);
+		fsocket_free_socket_mem((struct socket_alloc*)sock);
 		goto out;
 	}
 
@@ -542,7 +669,7 @@ static int fsocket_spawn_clone(int fd, struct socket *oldsock, struct socket **n
 		EPRINTK_LIMIT(ERR, "Spawn listen socket alloc dentry failed\n");
 		put_empty_filp(sfile);
 		fsock_release_sock(sock);
-		fsock_free_sock(sock);
+		fsocket_free_socket_mem((struct socket_alloc*)sock);
 		goto out;
 	}
 
@@ -1102,12 +1229,15 @@ static int fsocket_stats_show(struct seq_file *s, void *v)
 	struct fsocket_stats *stats;
 	int cpu;
 
-	seq_printf(s, "CPU    s_alloc    s_free\n");
+	seq_printf(s, "CPU    s_alloc    s_free    s_pool    s_lock\n");
 
 	for_each_online_cpu(cpu) {
 		stats = &per_cpu(fsocket_stats, cpu);
 
-		seq_printf(s, "%3d    %7d    %6d\n", cpu, stats->sock_alloc, stats->sock_free);
+		seq_printf(s, "%3d    %7d    %6d    %6d    %6d\n", 
+				cpu, 
+				stats->stats[FSOCKET_STATS_SOCK_ALLOC], stats->stats[FSOCKET_STATS_SOCK_FREE],
+				stats->stats[FSOCKET_STATS_SOCK_IN_POOL], stats->stats[FSOCKET_STATS_SOCK_POOL_LOCK]);
 	}
 
 	return 0;
@@ -1149,6 +1279,63 @@ static const struct file_operations fsocket_seq_fops = {
     .release = seq_release,
 };
 
+static void fsocket_fini_sock_pool(void)
+{
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		struct fsocket_pool *sock_pool = &per_cpu(fsocket_pool, cpu);
+		struct fsocket_alloc *pos, *n;
+
+		list_for_each_entry_safe(pos, n, &sock_pool->free_list, next) {
+			kmem_cache_free(fsocket_pool_cachep, pos);
+		}
+
+		list_for_each_entry_safe(pos, n, &sock_pool->backlog_list, next) {
+			kmem_cache_free(fsocket_pool_cachep, pos);
+		}
+	}
+
+	kmem_cache_destroy(fsocket_pool_cachep);
+}
+
+static int fsocket_init_sock_pool(void)
+{
+	int cpu, i;
+
+	/* Makesure the percpu sock pool is initialized */
+	for_each_online_cpu(cpu) {		
+		struct fsocket_pool *sock_pool = &per_cpu(fsocket_pool, cpu);
+
+		INIT_LIST_HEAD(&sock_pool->free_list);
+		INIT_LIST_HEAD(&sock_pool->backlog_list);
+		spin_lock_init(&sock_pool->backlog_lock);
+	}
+
+	for_each_online_cpu(cpu) {
+		struct fsocket_pool *sock_pool = &per_cpu(fsocket_pool, cpu);
+		struct fsocket_alloc *fsock;
+
+		for (i = 0; i < enable_socket_pool_size; ++i) {
+			fsock = kmem_cache_alloc_node(fsocket_pool_cachep, GFP_KERNEL, cpu_to_node(cpu));
+			if (fsock) {				
+				fsock->cpu_id = cpu;
+				list_add(&fsock->next, &sock_pool->free_list);
+				sock_pool->free_cnt++;
+				FSOCKET_INC_CPU_STATS(cpu, FSOCKET_STATS_SOCK_IN_POOL);
+			} else {
+				goto error;
+			}
+		}
+	}	
+
+	return 0;
+
+error:
+	fsocket_fini_sock_pool();
+	return -ENOMEM;
+}
+
 int fsocket_init(void)
 {
 	int ret;
@@ -1179,14 +1366,38 @@ int fsocket_init(void)
 	}
 	if (enable_skb_pool)
 		printk(KERN_INFO "Fastsocket: Enable Skb Pool[Mode-%d]\n", enable_skb_pool);
+		
 	if (enable_receive_cpu_selection) {
 		enable_rps_framework = 1;
 		rps_register(&rcs_rps_entry);
 		printk(KERN_INFO "Fastsocket: Enable Receive CPU Selection\n");
 	}
 
+	if (enable_socket_pool_size) {		
+		fsocket_pool_cachep = kmem_cache_create("fsocket_pool_cache", sizeof(struct fsocket_alloc), 0,
+				SLAB_HWCACHE_ALIGN | SLAB_RECLAIM_ACCOUNT |
+				SLAB_MEM_SPREAD | SLAB_PANIC, init_once);
+		if (!fsocket_pool_cachep) {
+			EPRINTK_LIMIT(ERR, "Allocate fsocket pool cachep failed\n");
+			ret = -ENOMEM;
+			goto err3;
+		}
+		
+		ret = fsocket_init_sock_pool();
+		if (ret) {
+			EPRINTK_LIMIT(ERR, "Fail to init sock pool\n");
+			goto err4;
+		}
+	
+		printk(KERN_INFO "Fastsocket: Enable socket pool[Size-%d]\n", enable_socket_pool_size);
+	}
+
 	return 0;
 
+err4:
+	fsocket_fini_sock_pool();
+err3:
+	proc_net_remove(&init_net, "fsocket_stats");
 err2:
 	kmem_cache_destroy(fsocket_cachep);
 err1:
@@ -1219,6 +1430,10 @@ void fsocket_exit(void)
 	proc_net_remove(&init_net, "fsocket_stats");
 
 	kmem_cache_destroy(fsocket_cachep);
+
+	if (enable_socket_pool_size) {
+		fsocket_fini_sock_pool();
+	}
 
 }
 
@@ -1271,7 +1486,7 @@ int fsocket_socket(int flags)
 release_sock:
 	fsock_release_sock(sock);
 free_sock:
-	fsock_free_sock(sock);
+	fsocket_free_socket_mem((struct socket_alloc*)sock);
 out:
 	return err;
 }
@@ -1435,7 +1650,7 @@ int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
 	if (unlikely(newfd < 0)) {
 		EPRINTK_LIMIT(ERR, "Allocate file for new socket failed\n");
 		err = newfd;
-		fsock_free_sock(newsock);
+		fsocket_free_socket_mem((struct socket_alloc*)newsock);
 		goto out;
 	}
 
@@ -1559,14 +1774,13 @@ out_unlock:
 struct inode *fsocket_alloc_inode(struct super_block *sb)
 {
 	struct socket_alloc *ei;
-	struct fsocket_stats *stats = &__get_cpu_var(fsocket_stats);
 
-	ei = kmem_cache_alloc(fsocket_cachep, GFP_KERNEL);
+	ei = fsocket_alloc_socket_mem();
 	if (!ei)
 		return NULL;
 
 	if (security_inode_alloc(&ei->vfs_inode)) {
-		kmem_cache_free(fsocket_cachep, ei);
+		fsocket_free_socket_mem(ei);
 		return NULL;
 	}
 
@@ -1581,8 +1795,6 @@ struct inode *fsocket_alloc_inode(struct super_block *sb)
 
 	DPRINTK(DEBUG, "Allocate inode 0x%p\n", &ei->vfs_inode);
 
-	++stats->sock_alloc;
-
 	return &ei->vfs_inode;
 }
 
@@ -1594,6 +1806,6 @@ void fsocket_destroy_inode(struct inode *inode)
 		security_inode_free(inode);
 	}
 	fsock_release_sock(SOCKET_I(inode));
-	fsock_free_sock(SOCKET_I(inode));
+	fsocket_free_socket_mem((struct socket_alloc*)(SOCKET_I(inode)));
 }
 
