@@ -159,6 +159,7 @@ static struct socket_alloc *fsocket_alloc_socket_mem(void)
 
 		fsock_alloc = kmem_cache_alloc(fsocket_pool_cachep, GFP_KERNEL);
 		if (likely(fsock_alloc)) {
+			fsock_alloc->cpu_id = smp_processor_id();
 			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ALLOC);
 			return &fsock_alloc->sock_alloc;
 		}
