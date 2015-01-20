@@ -297,6 +297,7 @@ HAProxy performance can be further increased by Fastsocket with these new featur
 ## CONTACTS ##
 
 Mailing-list: fastsocket@librelist.com
+Google Group: fastsocket-dev (https://groups.google.com/forum/#!forum/fastsocket-dev)
 
 Sending a mail to the address above will subcribe to the mailing list. The subject and message 
 do not matter.

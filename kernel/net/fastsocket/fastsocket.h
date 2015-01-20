@@ -111,6 +111,8 @@ extern int enable_skb_pool;
 extern int enable_rps_framework;
 extern int enable_receive_cpu_selection;
 extern int enable_direct_tcp;
+extern int enable_socket_pool_size;
+
 /* Fastsocket spawn cpu */
 extern cpumask_t fastsocket_spawn_cpuset;
 extern int fastsocket_spawn_cpu;

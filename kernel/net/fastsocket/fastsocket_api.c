@@ -22,6 +22,7 @@ int enable_skb_pool;
 int enable_rps_framework;
 int enable_receive_cpu_selection = 0;
 int enable_direct_tcp = 0;
+int enable_socket_pool_size = 0;
 
 module_param(enable_fastsocket_debug,int, 0);
 module_param(enable_listen_spawn, int, 0);
@@ -30,6 +31,7 @@ module_param(enable_fast_epoll, int, 0);
 module_param(enable_direct_tcp, int, 0);
 module_param(enable_skb_pool, int, 0);
 module_param(enable_receive_cpu_selection, int, 0);
+module_param(enable_socket_pool_size, int, 0);
 
 MODULE_PARM_DESC(enable_fastsocket_debug, " Debug level [Default: 3]" );
 MODULE_PARM_DESC(enable_listen_spawn, " Control Listen-Spawn: 0 = Disabled, 1 = Process affinity required, 2 = Autoset process affinity[Default]");
@@ -38,6 +40,7 @@ MODULE_PARM_DESC(enable_fast_epoll, " Control Fast-Epoll: 0 = Disabled, 1 = Enab
 MODULE_PARM_DESC(enable_direct_tcp, " Control Direct-TCP: 0 = Disbale[Default], 1 = Enabled");
 MODULE_PARM_DESC(enable_skb_pool, " Control Skb-Pool: 0 = Disbale[Default], 1 = Receive skb pool, 2 = Send skb pool,  3 = Both skb pool");
 MODULE_PARM_DESC(enable_receive_cpu_selection, " Control RCS: 0 = Disabled[Default], 1 = Enabled");
+MODULE_PARM_DESC(enable_socket_pool_size, "Control socket pool size: 0 = Disabled[Default], other are the pool size");
 
 DEFINE_RATELIMIT_STATE(fastsocket_ratelimit_state, 5 * HZ, 10);
 

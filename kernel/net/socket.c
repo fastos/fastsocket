@@ -1059,7 +1059,7 @@ out_release:
 }
 
 /* No kernel lock held - perfect */
-static unsigned int sock_poll(struct file *file, poll_table *wait)
+unsigned int sock_poll(struct file *file, poll_table *wait)
 {
 	struct socket *sock;
 
@@ -1069,6 +1069,7 @@ static unsigned int sock_poll(struct file *file, poll_table *wait)
 	sock = file->private_data;
 	return sock->ops->poll(file, sock, wait);
 }
+EXPORT_SYMBOL(sock_poll);
 
 static int sock_mmap(struct file *file, struct vm_area_struct *vma)
 {
