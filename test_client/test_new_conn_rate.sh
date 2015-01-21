@@ -2,6 +2,7 @@
 
 declare -i threads_nr=10
 declare -i test_time=300
+declare test_url="./url.txt"
 
 test_exit()
 {
@@ -18,6 +19,10 @@ if [ $# -gt 1 ]; then
 	test_time=$2
 fi
 
+if [ $# -gt 2 ]; then
+	test_url=$3
+fi
+
 trap "test_exit" 2 3 9 15
 
 echo "Start $threads_nr threads, ${threads_nr}k new connections per second"
@@ -26,7 +31,7 @@ echo "Test time is ${test_time} seconds"
 declare -i i=0;
 
 while ((i < threads_nr)); do
-	http_load -rate 1000 -seconds ${test_time} ./url.txt 1>/dev/null 2>&1 & 
+	http_load -rate 1000 -seconds ${test_time} ${test_url} 1>/dev/null 2>&1 & 
 	let ++i
 done
 
