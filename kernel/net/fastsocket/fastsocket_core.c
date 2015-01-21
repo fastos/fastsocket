@@ -562,6 +562,7 @@ static struct socket *fsocket_alloc_socket(void)
 	return sock;
 	
 err2:
+	module_put(THIS_MODULE);
 	fsocket_free_socket_mem((struct socket_alloc*)sock);
 err1:
 	return NULL;
