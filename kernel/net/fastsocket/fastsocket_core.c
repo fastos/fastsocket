@@ -37,6 +37,10 @@
 #define ENABLE_LISTEN_SPAWN_REQUIRED_AFFINITY	1
 #define ENABLE_LISTEN_SPAWN_AUTOSET_AFFINITY	2
 
+
+
+#define FSOCKET_MEM_POOL_BACKLOG_MAX_LIMIT			(16)
+
 enum {
 	FSOCKET_STATS_SOCK_ALLOC,
 	FSOCKET_STATS_SOCK_FREE,
@@ -189,6 +193,16 @@ static inline void fsocket_free_socket_mem(struct socket_alloc *sock_alloc)
 		if (fsock_pool->free_cnt+fsock_pool->backlog_cnt >= enable_socket_pool_size) {
 			kmem_cache_free(fsocket_pool_cachep, fsock);
 			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_FREE);
+			if (fsock_pool->backlog_cnt > FSOCKET_MEM_POOL_BACKLOG_MAX_LIMIT) {
+            	spin_lock(&fsock_pool->backlog_lock);
+            	if (fsock_pool->backlog_cnt > FSOCKET_MEM_POOL_BACKLOG_MAX_LIMIT)  {
+                	list_splice_init(&fsock_pool->backlog_list, &fsock_pool->free_list);
+                	fsock_pool->free_cnt += fsock_pool->backlog_cnt;
+                	fsock_pool->backlog_cnt = 0;
+
+            	}
+            	spin_unlock(&fsock_pool->backlog_lock);
+			}
 		} else {
 			if (fsock->cpu_id == cpu) {
 				FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_IN_POOL);
@@ -562,6 +576,7 @@ static struct socket *fsocket_alloc_socket(void)
 	return sock;
 	
 err2:
+	module_put(THIS_MODULE);
 	fsocket_free_socket_mem((struct socket_alloc*)sock);
 err1:
 	return NULL;
