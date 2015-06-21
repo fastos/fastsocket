@@ -5,6 +5,12 @@ config TRACE_IRQFLAGS_SUPPORT
 
 source "lib/Kconfig.debug"
 
+config UNIT_PERF
+    bool "Unit performance profile"
+    default y
+    ---help---
+      Enable the unit perf funciton. You could specify the codes which you want to monitor.
+
 config STRICT_DEVMEM
 	bool "Filter access to /dev/mem"
 	---help---
