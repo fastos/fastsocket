@@ -7,6 +7,9 @@ obj-$(CONFIG_XEN) += xen/
 # lguest paravirtualization support
 obj-$(CONFIG_LGUEST_GUEST) += lguest/
 
+# Unit Perf
+obj-$(CONFIG_UNIT_PERF) += unit_perf/
+
 obj-y += kernel/
 obj-y += mm/
 
