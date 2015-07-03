@@ -142,6 +142,7 @@ static void set_skb_frag(struct sk_buff *skb, struct page *page,
 
 	skb->data_len += f->size;
 	skb->len += f->size;
+	skb->truesize += PAGE_SIZE;
 	skb_shinfo(skb)->nr_frags++;
 	skb_tx(skb)->shared_frag = 1;
 	*len -= f->size;
@@ -268,7 +269,6 @@ static void receive_buf(struct net_device *dev, void *buf, unsigned int len)
 	}
 
 	hdr = skb_vnet_hdr(skb);
-	skb->truesize += skb->data_len;
 	dev->stats.rx_bytes += skb->len;
 	dev->stats.rx_packets++;
 
