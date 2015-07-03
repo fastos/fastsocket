@@ -924,7 +924,11 @@ static int tomoyo_write_profile(struct tomoyo_io_buffer *head)
 		return -EINVAL;
 	*cp = '\0';
 	if (!strcmp(data, "COMMENT")) {
-		profile->comment = tomoyo_save_name(cp + 1);
+		const struct tomoyo_path_info *new_comment
+			= tomoyo_save_name(cp + 1);
+		if (!new_comment)
+			return -ENOMEM;
+		profile->comment = new_comment;
 		return 0;
 	}
 	for (i = 0; i < TOMOYO_MAX_CONTROL_INDEX; i++) {
@@ -1840,7 +1844,7 @@ void tomoyo_load_policy(const char *filename)
 	envp[0] = "HOME=/";
 	envp[1] = "PATH=/sbin:/bin:/usr/sbin:/usr/bin";
 	envp[2] = NULL;
-	call_usermodehelper(argv[0], argv, envp, 1);
+	call_usermodehelper(argv[0], argv, envp, UMH_WAIT_PROC);
 
 	printk(KERN_INFO "TOMOYO: 2.2.0   2009/04/01\n");
 	printk(KERN_INFO "Mandatory Access Control activated.\n");
