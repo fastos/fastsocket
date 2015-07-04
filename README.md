@@ -305,9 +305,9 @@ do not matter.
 ## Stable Tests ##
 I create one Nginx HTTP forward proxy with the fastsocket, you could use it as the proxy to help test the stability.  
 The proxy address is 123.57.232.227:8080.  
-The following is the hardware of the server.
-It is an ECS instance of Aliyun, which has two CPUs, 2G mem, and 1M band.
-Not a strong server, is it? Yes, but I afford it with 200 RMB per month by myself. 
+The following is the hardware of the server.  
+It is an ECS instance of Aliyun, which has two CPUs, 2G mem, and 1M band.  
+Not a strong server, is it? Yes, but I afford it with 200 RMB per month by myself.   
 
 ATTENTION: Because nginx does not support the https forward proxy, so you only use it for the http traffic.  
 
