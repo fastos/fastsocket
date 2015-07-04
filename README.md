@@ -32,7 +32,7 @@ Meanwhile, The underlying kernel optimization of Fastsocket is transparent for
 socket applications, which means existing applications can take advantage of 
 Fastsocket without changing their codes.
 
-Currently Fastsocket is implemented in the Linux kernel(kernel-2.6.32-431.20.3.0.1.el6.x86_64) 
+Currently Fastsocket is implemented in the Linux kernel(kernel-2.6.32-431.29.2.el6.x86_64) 
 of CentOS-6.5 which is the latest version of redhat EL6, 
 since CentOS-6.5 is our major production environment system. 
 According to our evaluations, Fastsocket increases throughput of Nginx and
