@@ -308,6 +308,7 @@ The proxy address is 123.57.232.227:8080.
 The following is the hardware of the server.  
 It is an ECS instance of Aliyun, which has two CPUs, 2G mem, and 1M band.  
 Not a strong server, is it? Yes, but I afford it with 200 RMB per month by myself.   
+When I am developing on this server by remote, the proxy will be stopped becasue of the poor band.  
 
 ATTENTION: Because nginx does not support the https forward proxy, so you only use it for the http traffic.  
 
