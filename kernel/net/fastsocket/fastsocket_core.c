@@ -203,6 +203,7 @@ static inline void fsocket_move_socket_mem(struct fsocket_pool *src_pool, struct
 		// Change CPU ID
 		pos->cpu_id = cpu_id;
 		list_add(&pos->next, &dst_pool->free_list);
+		dst_pool->free_cnt++;
 		FSOCKET_INC_CPU_STATS(cpu_id, FSOCKET_STATS_SOCK_IN_POOL);
 
 		++i;
