@@ -42,8 +42,10 @@
 #define FSOCKET_MEM_POOL_BACKLOG_MAX_LIMIT			(16)
 
 enum {
-	FSOCKET_STATS_SOCK_ALLOC,
-	FSOCKET_STATS_SOCK_FREE,
+	FSOCKET_STATS_SOCK_ALLOC_FROM_SLAB,
+	FSOCKET_STATS_SOCK_FREE_TO_SLAB,
+	FSOCKET_STATS_SOCK_ALLOC_FROM_POOL,
+	FSOCKET_STATS_SOCK_FREE_TO_POOL,
 	FSOCKET_STATS_SOCK_IN_POOL,
 	FSOCKET_STATS_SOCK_POOL_LOCK,
 
@@ -58,8 +60,8 @@ struct fsocket_pool {
 	struct list_head free_list;
 	struct list_head backlog_list;
 	spinlock_t backlog_lock;
-	u32 free_cnt;
-	u32 backlog_cnt;
+	int free_cnt;
+	int backlog_cnt;
 };
 
 struct fsocket_alloc {
@@ -100,6 +102,7 @@ static struct kmem_cache *fsocket_pool_cachep;
 		struct fsocket_stats *fstats = &__get_cpu_var(fsocket_stats); \
 		--fstats->stats[stats_type]; \
 	} while (0)
+#define FSOCKET_GET_STATS(stats_type) (__get_cpu_var(fsocket_stats).stats[stats_type])
 
 #define FSOCKET_INC_CPU_STATS(cpu, stats_type) \
 	do { \
@@ -111,6 +114,8 @@ static struct kmem_cache *fsocket_pool_cachep;
 		struct fsocket_stats *fstats = &per_cpu(fsocket_stats, cpu); \
 		--fstats->stats[stats_type]; \
 	} while (0)
+#define FSOCKET_GET_CPU_STATS(cpu, stats_type) \
+	(per_cpu(fsocket_stats, cpu).stats[stats_type])
 	
 
 static inline void fsock_release_sock(struct socket *sock)
@@ -164,22 +169,46 @@ static struct socket_alloc *fsocket_alloc_socket_mem(void)
 		fsock_alloc = kmem_cache_alloc(fsocket_pool_cachep, GFP_KERNEL);
 		if (likely(fsock_alloc)) {
 			fsock_alloc->cpu_id = smp_processor_id();
-			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ALLOC);
+			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ALLOC_FROM_SLAB);
 			return &fsock_alloc->sock_alloc;
 		}
 
 		return NULL;
 
 alloc_from_pool:
+		FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ALLOC_FROM_POOL);
 		FSOCKET_DEC_STATS(FSOCKET_STATS_SOCK_IN_POOL);
 		return &fsock_alloc->sock_alloc;
 	} else {
 		socket = kmem_cache_alloc(fsocket_cachep, GFP_KERNEL);
 		if (likely(socket)) {
-			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ALLOC);
+			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ALLOC_FROM_SLAB);
 		}
 		
 		return socket;
+	}
+}
+
+
+static inline void fsocket_move_socket_mem(struct fsocket_pool *src_pool, struct fsocket_pool *dst_pool, u32 cpu_id, int move_cnt)
+{
+	struct fsocket_alloc *pos, *next;
+	int i = 0;
+
+	list_for_each_entry_safe(pos, next, &src_pool->free_list, next) {
+		list_del(&pos->next);
+		src_pool->free_cnt--;
+		FSOCKET_DEC_STATS(FSOCKET_STATS_SOCK_IN_POOL);
+
+		// Change CPU ID
+		pos->cpu_id = cpu_id;
+		list_add(&pos->next, &dst_pool->free_list);
+		FSOCKET_INC_CPU_STATS(cpu_id, FSOCKET_STATS_SOCK_IN_POOL);
+
+		++i;
+		if (i >= move_cnt) {
+			break;
+		}
 	}
 }
 
@@ -188,11 +217,12 @@ static inline void fsocket_free_socket_mem(struct socket_alloc *sock_alloc)
 	if (enable_socket_pool_size) {
 		struct fsocket_alloc *fsock = (struct fsocket_alloc *)sock_alloc;
 		struct fsocket_pool *fsock_pool = &per_cpu(fsocket_pool, fsock->cpu_id);
+		struct fsocket_pool *cur_fsock_pool = &__get_cpu_var(fsocket_pool);
 		int cpu = smp_processor_id();
 
 		if (fsock_pool->free_cnt+fsock_pool->backlog_cnt >= enable_socket_pool_size) {
 			kmem_cache_free(fsocket_pool_cachep, fsock);
-			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_FREE);
+			FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_FREE_TO_SLAB);
 			if (fsock_pool->backlog_cnt > FSOCKET_MEM_POOL_BACKLOG_MAX_LIMIT) {
             	spin_lock(&fsock_pool->backlog_lock);
             	if (fsock_pool->backlog_cnt > FSOCKET_MEM_POOL_BACKLOG_MAX_LIMIT)  {
@@ -205,6 +235,7 @@ static inline void fsocket_free_socket_mem(struct socket_alloc *sock_alloc)
 			}
 		} else {
 			if (fsock->cpu_id == cpu) {
+				FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_FREE_TO_POOL);
 				FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_IN_POOL);
 				preempt_disable();
 				list_add(&fsock->next, &fsock_pool->free_list);
@@ -215,14 +246,30 @@ static inline void fsocket_free_socket_mem(struct socket_alloc *sock_alloc)
 				spin_lock(&fsock_pool->backlog_lock);
 				list_add(&fsock->next, &fsock_pool->backlog_list);
 				fsock_pool->backlog_cnt++;
+				FSOCKET_INC_CPU_STATS(fsock->cpu_id, FSOCKET_STATS_SOCK_FREE_TO_POOL);
 				FSOCKET_INC_CPU_STATS(fsock->cpu_id, FSOCKET_STATS_SOCK_IN_POOL);
+
+				/*
+				The cur CPU has less socket mem load than that CPU.
+				So we move the socket mem to the master worker CPU.
+				*/
+				if (FSOCKET_GET_STATS(FSOCKET_STATS_SOCK_ALLOC_FROM_POOL) * 4 < FSOCKET_GET_CPU_STATS(fsock->cpu_id, FSOCKET_STATS_SOCK_ALLOC_FROM_POOL)) {
+					int move_cnt = cur_fsock_pool->free_cnt-fsock_pool->free_cnt;
+					if (move_cnt > 0) {
+						DPRINTK(INFO, "CPU(%u) move %d socket mem to CPU(%d)",
+							cpu, move_cnt, fsock->cpu_id);
+						preempt_disable();
+						fsocket_move_socket_mem(cur_fsock_pool, fsock_pool, fsock->cpu_id, move_cnt);
+						preempt_enable();
+					}
+				}
 				spin_unlock(&fsock_pool->backlog_lock);
 			}
 		}			
 	} else {		
 		kmem_cache_free(fsocket_cachep, sock_alloc);
 		
-		FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_FREE);
+		FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_FREE_TO_SLAB);
 	}
 
 	module_put(THIS_MODULE);
@@ -1245,15 +1292,19 @@ static int fsocket_stats_show(struct seq_file *s, void *v)
 	struct fsocket_stats *stats;
 	int cpu;
 
-	seq_printf(s, "CPU    s_alloc    s_free    s_pool    s_lock\n");
+	seq_printf(s, "CPU    s_alloc_slab    s_free_slab    s_alloc_pool    s_free_pool    s_pool    s_lock\n");
 
 	for_each_online_cpu(cpu) {
 		stats = &per_cpu(fsocket_stats, cpu);
 
-		seq_printf(s, "%3d    %7d    %6d    %6d    %6d\n", 
+		seq_printf(s, "%3d    %12d    %11d    %12d    %11d    %6d    %6d\n", 
 				cpu, 
-				stats->stats[FSOCKET_STATS_SOCK_ALLOC], stats->stats[FSOCKET_STATS_SOCK_FREE],
-				stats->stats[FSOCKET_STATS_SOCK_IN_POOL], stats->stats[FSOCKET_STATS_SOCK_POOL_LOCK]);
+				stats->stats[FSOCKET_STATS_SOCK_ALLOC_FROM_SLAB],
+				stats->stats[FSOCKET_STATS_SOCK_FREE_TO_SLAB],
+				stats->stats[FSOCKET_STATS_SOCK_ALLOC_FROM_POOL],
+				stats->stats[FSOCKET_STATS_SOCK_FREE_TO_POOL],
+				stats->stats[FSOCKET_STATS_SOCK_IN_POOL], 
+				stats->stats[FSOCKET_STATS_SOCK_POOL_LOCK]);
 	}
 
 	return 0;
