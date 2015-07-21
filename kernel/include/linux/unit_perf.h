@@ -76,6 +76,15 @@ static void up_func_once_irq(const char *name, up_test_func cb, void *data)
 #define UP_AUTO_START_FUNC_MONITOR()				up_start_monitor(__FUNCTION__)
 #define UP_AUTO_END_FUNC_MONITOR()					up_end_monitor(__FUNCTION__)
 
+
+
+extern unsigned long g_up_monitor_pid __read_mostly;
+
+#define UP_PID_INFO_LOG(...) \
+	if (g_up_monitor_pid == current->pid) { \
+		printk(KERN_INFO  "[UnitPerf]:"__VA_ARGS__); \
+	}
+
 #endif
 
 

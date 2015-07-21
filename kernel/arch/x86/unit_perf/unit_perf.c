@@ -7,6 +7,7 @@
 #include <linux/jhash.h>
 #include <linux/sort.h>
 #include <asm/div64.h>
+#include <asm/uaccess.h>
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Feng Gao <gfree.wind@gmail.com>");
@@ -25,6 +26,9 @@ struct proc_dir_entry *unit_perf_dir = NULL;
 struct proc_dir_entry *unit_perf_top_proc = NULL;
 #define UNIT_PERF_RESET_RESULT			"reset_result"
 struct proc_dir_entry *unit_perf_reset_proc = NULL;
+#define UNIT_PERF_MONITOR_PID			"monitor_pid"
+struct proc_dir_entry *unit_perf_mpid_proc = NULL;
+unsigned long g_up_monitor_pid __read_mostly = 0;
 
 struct cpu_cost_stats {
 	unsigned long long start;
@@ -541,6 +545,34 @@ static const struct file_operations up_reset_proc_fops = {
     .release = seq_release
 };
 
+static int up_show_monitor_pid(char *page, char **start, off_t offset,
+	int count, int *eof, void *data)
+{
+	return snprintf(page, count, "%lu\n", g_up_monitor_pid);
+}
+
+static int up_store_monitor_pid(struct file *file, const char *buffer, 
+	unsigned long count, void *data)
+{
+	char buf[32] = {0};
+	unsigned long copy_bytes = sizeof(buf)-1;
+	char *p = (char *)buf;
+
+	if (copy_bytes > count) {
+		copy_bytes = count;
+	}
+
+	if (copy_from_user(buf, buffer, copy_bytes)) {
+		return count;
+	}
+
+	g_up_monitor_pid = simple_strtoul(p, &p, 10);
+
+	printk(KERN_INFO "Unit Perf: The monitor pid is updated to %lu\n", g_up_monitor_pid);
+
+	return copy_bytes;
+}
+
 #ifdef TEST_UNIT_PERF
 static void test_monitor(void)
 {
@@ -599,11 +631,20 @@ static int __init unit_perf_init(void)
 		printk(KERN_ERR "Fail to create the unit_perf reset file\n");
 		goto err3;
 	}
+	unit_perf_mpid_proc = create_proc_entry(UNIT_PERF_MONITOR_PID, S_IFREG | S_IRUGO | S_IWUSR, unit_perf_dir);
+	if (!unit_perf_mpid_proc) {
+		printk(KERN_ERR "Fail to create the unit_perf monitor_pid file\n");
+		goto err4;
+	}
+	unit_perf_mpid_proc->read_proc = up_show_monitor_pid;
+	unit_perf_mpid_proc->write_proc = up_store_monitor_pid;
+	unit_perf_mpid_proc->data = NULL;
+	
 	g_up_monitor = unit_perf_monitor_alloc();
 	if (!g_up_monitor) {
 		ret = -ENOMEM;
 		printk(KERN_ERR "Fail to init unit_perf monitor\n");
-		goto err4;
+		goto err5;
 	}
 
 	printk(KERN_INFO "Unit Perf is ready now\n");
@@ -613,6 +654,8 @@ static int __init unit_perf_init(void)
 #endif	
 	return 0;
 
+err5:
+	remove_proc_entry(UNIT_PERF_MONITOR_PID, unit_perf_dir);
 err4:
 	remove_proc_entry(UNIT_PERF_RESET_RESULT, unit_perf_dir);
 err3:
@@ -637,6 +680,7 @@ static void __exit unit_perf_exit(void)
 
 	unit_perf_monitor_free(monitor);
 
+	remove_proc_entry(UNIT_PERF_MONITOR_PID, unit_perf_dir);
 	remove_proc_entry(UNIT_PERF_RESET_RESULT, unit_perf_dir);
 	remove_proc_entry(UNIT_PERF_TOP_LIST, unit_perf_dir);
 	remove_proc_entry(UNIT_PERF_DIR_NAME, NULL);
