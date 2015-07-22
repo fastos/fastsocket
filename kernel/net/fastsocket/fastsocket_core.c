@@ -48,6 +48,7 @@ enum {
 	FSOCKET_STATS_SOCK_FREE_TO_POOL,
 	FSOCKET_STATS_SOCK_IN_POOL,
 	FSOCKET_STATS_SOCK_POOL_LOCK,
+	FSOCKET_STATS_SOCK_ACCEPT_CONNS,
 
 	FSOCKET_STATS_NR
 };
@@ -1021,6 +1022,8 @@ static int fsocket_process_affinity_check(int rcpu)
 	ncpu = cpumask_next(ccpu, omask);
 	free_cpumask_var(omask);
 
+	DPRINTK(DEBUG, "Current process ccpu(%d) ncpu(%d)\n", ccpu, ncpu);
+
 	if (ccpu >= nr_cpu_ids) {
 		DPRINTK(DEBUG, "Current process affinity is messed up\n");
 		return -EINVAL;
@@ -1293,19 +1296,20 @@ static int fsocket_stats_show(struct seq_file *s, void *v)
 	struct fsocket_stats *stats;
 	int cpu;
 
-	seq_printf(s, "CPU    s_alloc_slab    s_free_slab    s_alloc_pool    s_free_pool    s_pool    s_lock\n");
+	seq_printf(s, "CPU    s_alloc_slab    s_free_slab    s_alloc_pool    s_free_pool    s_pool    s_lock    accept_conns\n");
 
 	for_each_online_cpu(cpu) {
 		stats = &per_cpu(fsocket_stats, cpu);
 
-		seq_printf(s, "%3d    %12d    %11d    %12d    %11d    %6d    %6d\n", 
+		seq_printf(s, "%3d    %12d    %11d    %12d    %11d    %6d    %6d    %12d\n", 
 				cpu, 
 				stats->stats[FSOCKET_STATS_SOCK_ALLOC_FROM_SLAB],
 				stats->stats[FSOCKET_STATS_SOCK_FREE_TO_SLAB],
 				stats->stats[FSOCKET_STATS_SOCK_ALLOC_FROM_POOL],
 				stats->stats[FSOCKET_STATS_SOCK_FREE_TO_POOL],
 				stats->stats[FSOCKET_STATS_SOCK_IN_POOL], 
-				stats->stats[FSOCKET_STATS_SOCK_POOL_LOCK]);
+				stats->stats[FSOCKET_STATS_SOCK_POOL_LOCK],
+				stats->stats[FSOCKET_STATS_SOCK_ACCEPT_CONNS]);
 	}
 
 	return 0;
@@ -1676,6 +1680,8 @@ restore:
 out:
 	mutex_unlock(&fastsocket_spawn_mutex);
 
+	DPRINTK(DEBUG, "fsocket_spawn return value is %d\n", ret);	
+
 	return ret;
 }
 
@@ -1778,6 +1784,7 @@ int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
 	err = newfd;
 
 	DPRINTK(DEBUG, "Accept file 0x%p new fd %d\n", file, newfd);
+	FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ACCEPT_CONNS);
 
 	goto out;
 
