@@ -206,11 +206,11 @@ Some important configurations:
 - Http_load fetches a 64 bytes static file from Nginx with a concurrency of 500
   multiplied by the number of cores.
 - We enable memory cache for that static file in order to rule out any disk affection.
-- **accept mutex is disabled**.
+- **accept mutex is disabled**.  The default value of nginx is on.  
 
-Note: **DO DISABLE accept_mutex!** With default Fastsocket module parameters, 
+Note: **YOU'D BETTER DO DISABLE accept_mutex!** With default Fastsocket module parameters, 
 Fastsocket has partioned listen socket, therefore, there is no need to force
-user to accept connections one by one.
+user to accept connections one by one. If some cpu had no chance to receive packet especially the tcp syn packet by RPS or others, the nginx would **fail to accept the new conn forever** with accept_mutex enabled. So you should make sure the new request could be passed to every CPU, if you want load blance the accept with accept mutex of nginx.  
 
 From the figure below, Fastsocket on 24 CPU cores achieves 475K connection per second (cps), 
 with a speed up of 21X. The throughput of base CentOS-6.5 kernel increases
@@ -296,8 +296,8 @@ HAProxy performance can be further increased by Fastsocket with these new featur
 
 ## CONTACTS ##
 
-Mailing-list: fastsocket@librelist.com
-Google Group: fastsocket-dev (https://groups.google.com/forum/#!forum/fastsocket-dev)
+Mailing-list: fastsocket@librelist.com  
+Google Group: fastsocket-dev (https://groups.google.com/forum/#!forum/fastsocket-dev)  
 
 Sending a mail to the address above will subcribe to the mailing list. The subject and message 
 do not matter.
