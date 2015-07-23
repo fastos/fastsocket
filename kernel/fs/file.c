@@ -368,6 +368,12 @@ struct files_struct *dup_fd(struct files_struct *oldf, int *errorp)
 		struct file *f = *old_fds++;
 		if (f) {
 			get_file(f);
+			if (f->sub_file) {
+				get_file(f->sub_file);
+			}
+			if (f->old_file) {
+				get_file(f->old_file);
+			}
 		} else {
 			/*
 			 * The fd may be claimed in the fd bitmap but not yet

@@ -48,6 +48,7 @@ enum {
 	FSOCKET_STATS_SOCK_FREE_TO_POOL,
 	FSOCKET_STATS_SOCK_IN_POOL,
 	FSOCKET_STATS_SOCK_POOL_LOCK,
+	FSOCKET_STATS_SOCK_ACCEPT_CONNS,
 
 	FSOCKET_STATS_NR
 };
@@ -301,12 +302,11 @@ static int __fsocket_filp_close(struct file *file)
 		}
 
 		dput(dentry);
-		return 0;
-
 	} else {
 		DPRINTK(DEBUG, "Next time to release file 0x%p[%ld]\n", file, atomic_long_read(&file->f_count));
-		return 1;
 	}
+
+	return 0;
 }
 
 static inline int fsocket_filp_close(struct file *file)
@@ -559,8 +559,9 @@ static int fsock_map_fd(struct socket *sock, int flags)
 	struct file *newfile;
 
 	int fd = fsock_alloc_file(sock, &newfile, flags);
-	if (likely(fd >= 0))
+	if (likely(fd >= 0)) {
 		fd_install(fd, newfile);
+	}
 
 	return fd;
 }
@@ -984,8 +985,17 @@ static void fsocket_process_affinity_set(int cpu)
 
 static void fsocket_process_affinity_restore(int cpu)
 {
-	cpu_clear(cpu, fastsocket_spawn_cpuset);
-	fastsocket_spawn_cpu--;
+	struct cpumask mask;
+	
+	cpumask_clear(&mask);
+	cpus_setall(mask);
+
+	sched_setaffinity(current->pid, &mask);
+
+	if (-1 != cpu) {
+		cpu_clear(cpu, fastsocket_spawn_cpuset);
+		fastsocket_spawn_cpu--;
+	}
 }
 
 /* Currently, user required CPU affinity is not supported. However, the feature 
@@ -1020,6 +1030,8 @@ static int fsocket_process_affinity_check(int rcpu)
 	ccpu = cpumask_first(omask);
 	ncpu = cpumask_next(ccpu, omask);
 	free_cpumask_var(omask);
+
+	DPRINTK(DEBUG, "Current process ccpu(%d) ncpu(%d)\n", ccpu, ncpu);
 
 	if (ccpu >= nr_cpu_ids) {
 		DPRINTK(DEBUG, "Current process affinity is messed up\n");
@@ -1293,19 +1305,20 @@ static int fsocket_stats_show(struct seq_file *s, void *v)
 	struct fsocket_stats *stats;
 	int cpu;
 
-	seq_printf(s, "CPU    s_alloc_slab    s_free_slab    s_alloc_pool    s_free_pool    s_pool    s_lock\n");
+	seq_printf(s, "CPU    s_alloc_slab    s_free_slab    s_alloc_pool    s_free_pool    s_pool    s_lock    accept_conns\n");
 
 	for_each_online_cpu(cpu) {
 		stats = &per_cpu(fsocket_stats, cpu);
 
-		seq_printf(s, "%3d    %12d    %11d    %12d    %11d    %6d    %6d\n", 
+		seq_printf(s, "%3d    %12d    %11d    %12d    %11d    %6d    %6d    %12d\n", 
 				cpu, 
 				stats->stats[FSOCKET_STATS_SOCK_ALLOC_FROM_SLAB],
 				stats->stats[FSOCKET_STATS_SOCK_FREE_TO_SLAB],
 				stats->stats[FSOCKET_STATS_SOCK_ALLOC_FROM_POOL],
 				stats->stats[FSOCKET_STATS_SOCK_FREE_TO_POOL],
 				stats->stats[FSOCKET_STATS_SOCK_IN_POOL], 
-				stats->stats[FSOCKET_STATS_SOCK_POOL_LOCK]);
+				stats->stats[FSOCKET_STATS_SOCK_POOL_LOCK],
+				stats->stats[FSOCKET_STATS_SOCK_ACCEPT_CONNS]);
 	}
 
 	return 0;
@@ -1598,6 +1611,13 @@ out:
 	return ret;
 }
 
+void fscoket_spawn_restore(struct socket *sock, int fd)
+{
+	fsocket_sk_affinity_release(sock);
+	fsocket_filp_close_spawn(fd);
+	fsocket_process_affinity_restore(sock->sk->sk_local);
+}
+
 int fsocket_spawn(struct file *filp, int fd, int tcpu)
 {
 	int ret = 0, backlog;
@@ -1606,7 +1626,7 @@ int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	struct sockaddr_in addr;
 	kernel_cap_t p;
 
-	DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
+	DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d. filp->sub_file(%p)\n", fd, tcpu, filp->sub_file);
 
 	mutex_lock(&fastsocket_spawn_mutex);
 
@@ -1676,6 +1696,8 @@ restore:
 out:
 	mutex_unlock(&fastsocket_spawn_mutex);
 
+	DPRINTK(DEBUG, "fsocket_spawn return value is %d\n", ret);	
+
 	return ret;
 }
 
@@ -1721,6 +1743,7 @@ int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
 		fsocket_free_socket_mem((struct socket_alloc*)newsock);
 		goto out;
 	}
+	DPRINTK(DEBUG, "Accept newfile(%p) for newfd(%d)\n", newfile, newfd);
 
 	err = security_socket_accept(sock, newsock);
 	if (err) {	
@@ -1778,6 +1801,7 @@ int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
 	err = newfd;
 
 	DPRINTK(DEBUG, "Accept file 0x%p new fd %d\n", file, newfd);
+	FSOCKET_INC_STATS(FSOCKET_STATS_SOCK_ACCEPT_CONNS);
 
 	goto out;
 
