@@ -92,6 +92,12 @@ SYSCALL_DEFINE3(dup3, unsigned int, oldfd, unsigned int, newfd, int, flags)
 	if (!tofree && FD_ISSET(newfd, fdt->open_fds))
 		goto out_unlock;
 	get_file(file);
+	if (file->sub_file) {
+		get_file(file->sub_file);
+	}
+	if (file->old_file) {
+		get_file(file->old_file);
+	}
 	rcu_assign_pointer(fdt->fd[newfd], file);
 	FD_SET(newfd, fdt->open_fds);
 	if (flags & O_CLOEXEC)
@@ -349,6 +355,12 @@ static long do_fcntl(int fd, unsigned int cmd, unsigned long arg,
 		err = alloc_fd(arg, cmd == F_DUPFD_CLOEXEC ? O_CLOEXEC : 0);
 		if (err >= 0) {
 			get_file(filp);
+			if (filp->sub_file) {
+				get_file(filp->sub_file);
+			}
+			if (filp->old_file) {
+				get_file(filp->old_file);
+			}
 			fd_install(err, filp);
 		}
 		break;

@@ -20,6 +20,7 @@ typedef unsigned int u32;
 //#define FSOCKET_IOC_EPOLL_CTL _IO(IOC_ID, 0x05)
 #define FSOCKET_IOC_SPAWN_LISTEN _IO(IOC_ID, 0x06)
 #define FSOCKET_IOC_SHUTDOWN_LISTEN _IO(IOC_ID, 0x07)
+#define FSOCKET_IOC_SPAWN_ALL_LISTEN _IO(IOC_ID, 0x08)
 
 struct fsocket_ioctl_arg {
 	u32 fd;

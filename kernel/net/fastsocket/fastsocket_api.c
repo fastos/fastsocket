@@ -1,6 +1,8 @@
 #include <linux/syscalls.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/fdtable.h>
+#include <net/tcp_states.h>
 #include <linux/miscdevice.h>
 #include <linux/mount.h>
 
@@ -133,6 +135,47 @@ static int fastsocket_spawn_listen(struct fsocket_ioctl_arg *arg)
 	return ret;
 }
 
+static int fastsocket_spawn_all_listen(void)
+{
+	struct files_struct *files = current->files;
+	struct fdtable *fdt;
+	struct file *file;
+	unsigned int i;
+	int ret = 0;
+
+	DPRINTK(DEBUG, "Spawn all listen socket of pid(%u)\n", current->pid);
+
+	rcu_read_lock();
+	fdt = files_fdtable(files);
+
+	for (i = 0; i < fdt->max_fds; ++i) {
+		if (FD_ISSET(i, fdt->open_fds)) {
+			file = rcu_dereference(fdt->fd[i]);
+			if (file && file->f_mode & FMODE_FASTSOCKET) {
+				struct socket * sock = file->private_data;
+
+				DPRINTK(DEBUG, "fd(%d) is fastsocket fd, sock state(%d) subfile(%p)\n", 
+					i, sock->sk->sk_state, file->sub_file);
+
+				if (sock->sk->sk_state == TCP_LISTEN) {
+					if (file->sub_file) {
+						// The parent process has already spawn, we need to free the old one.
+						fscoket_spawn_restore(sock, i);
+						// Need to get the file again;
+						file = rcu_dereference(fdt->fd[i]);
+					}
+					ret += fsocket_spawn(file, i, -1);
+				}
+			}
+
+			rcu_read_unlock();
+		}
+	}
+	rcu_read_unlock();
+
+	return ret;
+}
+
 static int fastsocket_accept(struct fsocket_ioctl_arg *arg)
 {
 	int ret;
@@ -232,6 +275,9 @@ static long fastsocket_ioctl(struct file *filp, unsigned int cmd, unsigned long 
 		return fastsocket_shutdown_listen(&k_arg);
 	//case FSOCKET_IOC_EPOLL_CTL:
 	//	return fastsocket_epoll_ctl((struct fsocket_ioctl_arg *)arg);
+	case FSOCKET_IOC_SPAWN_ALL_LISTEN:
+		EPRINTK_LIMIT(DEBUG, "ioctl [%d] receive spawn all listen socket", cmd);
+		return fastsocket_spawn_all_listen();
 	default:
 		EPRINTK_LIMIT(ERR, "ioctl [%d] operation not support\n", cmd);
 		break;

@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <linux/eventpoll.h>
+#include <unistd.h>
 //#include <fcntl.h>
 
 #define __USE_GNU
@@ -165,8 +166,14 @@ int listen(int fd, int backlog)
 		if (ret < 0) {
 			FSOCKET_ERR("FSOCKET:Listen failed!\n");
 			fsocket_fd_set[fd] = 0;
-		}
+		} else {
+			arg.fd = fd;
+        	arg.op.spawn_op.cpu = -1;
 
+			if (ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN_LISTEN, &arg) < 0) {
+				FSOCKET_ERR("FSOCKET: spawn failed!\n");
+			}
+		}
 	} else {
 		ret =  real_listen(fd, backlog);
 	}
@@ -278,39 +285,30 @@ int shutdown(int fd, int how)
 	return ret;
 }
 
-
-int epoll_ctl(int efd, int cmd, int fd, struct epoll_event *ev)
+pid_t fork(void)
 {
-	static int (*real_epoll_ctl)(int, int, int, struct epoll_event *) = NULL;
-	int ret;
-	struct fsocket_ioctl_arg arg;
+	static int (*real_fork)(void) = NULL;
+	pid_t ret;
 
-	if (fsocket_channel_fd >= 0) {
-		arg.fd = fd;
-		arg.op.spawn_op.cpu = -1;
-
-		/* "Automatically" do the spawn */
-		if (fsocket_fd_set[fd] && cmd == EPOLL_CTL_ADD) {
-			ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN_LISTEN, &arg);
-			if (ret < 0) {
-				FSOCKET_ERR("FSOCKET: spawn failed!\n");
-			}
-		}
-
-		//arg.op.epoll_op.epoll_fd = efd;
-		//arg.op.epoll_op.ep_ctl_cmd = cmd;
-		//arg.op.epoll_op.ev = ev;
-
-		//ret = ioctl(fsocket_channel_fd, FSOCKET_IOC_EPOLL_CTL, &arg);
-		//if (ret < 0) {
-		//	FSOCKET_ERR("FSOCKET: epoll_ctl failed!\n");
-		//	return ret;
-		//}
+	if (!real_fork) {
+		real_fork = dlsym(RTLD_NEXT, "fork");
 	}
 
-	if (!real_epoll_ctl)
-		real_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
-	ret = real_epoll_ctl(efd, cmd, fd, ev);
+	ret = real_fork();
+	if (-1 == ret) {
+		FSOCKET_ERR("FSOCKET: fork failed!\n");
+	} else if (0 == ret) {
+		// Child process
+		if (fsocket_channel_fd >= 0) {
+			struct fsocket_ioctl_arg arg;
+			memset(&arg, 0, sizeof(arg));
+			// Spawn all listenning socket
+			ioctl(fsocket_channel_fd, FSOCKET_IOC_SPAWN_ALL_LISTEN, &arg);
+		}
+	} 
 
 	return ret;
 }
+
+
+

@@ -22,6 +22,7 @@
 //#define FSOCKET_IOC_EPOLL_CTL _IO(IOC_ID, 0x05)
 #define FSOCKET_IOC_SPAWN_LISTEN _IO(IOC_ID, 0x06)
 #define FSOCKET_IOC_SHUTDOWN_LISTEN _IO(IOC_ID, 0x07)
+#define FSOCKET_IOC_SPAWN_ALL_LISTEN _IO(IOC_ID, 0x08)
 
 #define ALERT 0x00
 #define ERR 0x01
@@ -127,6 +128,7 @@ extern void fsocket_exit(void);
 extern int fsocket_socket(int flags);
 extern int fsocket_listen(struct file *file, int backlog);
 extern int fsocket_spawn(struct file *filp, int fd, int tcpu);
+extern void fscoket_spawn_restore(struct socket *sock, int fd);
 extern int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
 		int __user *upeer_addrlen, int flags);
 extern int fsocket_shutdown_listen(struct file *file, int how);

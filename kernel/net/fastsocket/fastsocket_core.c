@@ -302,12 +302,11 @@ static int __fsocket_filp_close(struct file *file)
 		}
 
 		dput(dentry);
-		return 0;
-
 	} else {
 		DPRINTK(DEBUG, "Next time to release file 0x%p[%ld]\n", file, atomic_long_read(&file->f_count));
-		return 1;
 	}
+
+	return 0;
 }
 
 static inline int fsocket_filp_close(struct file *file)
@@ -560,8 +559,9 @@ static int fsock_map_fd(struct socket *sock, int flags)
 	struct file *newfile;
 
 	int fd = fsock_alloc_file(sock, &newfile, flags);
-	if (likely(fd >= 0))
+	if (likely(fd >= 0)) {
 		fd_install(fd, newfile);
+	}
 
 	return fd;
 }
@@ -985,8 +985,17 @@ static void fsocket_process_affinity_set(int cpu)
 
 static void fsocket_process_affinity_restore(int cpu)
 {
-	cpu_clear(cpu, fastsocket_spawn_cpuset);
-	fastsocket_spawn_cpu--;
+	struct cpumask mask;
+	
+	cpumask_clear(&mask);
+	cpus_setall(mask);
+
+	sched_setaffinity(current->pid, &mask);
+
+	if (-1 != cpu) {
+		cpu_clear(cpu, fastsocket_spawn_cpuset);
+		fastsocket_spawn_cpu--;
+	}
 }
 
 /* Currently, user required CPU affinity is not supported. However, the feature 
@@ -1602,6 +1611,13 @@ out:
 	return ret;
 }
 
+void fscoket_spawn_restore(struct socket *sock, int fd)
+{
+	fsocket_sk_affinity_release(sock);
+	fsocket_filp_close_spawn(fd);
+	fsocket_process_affinity_restore(sock->sk->sk_local);
+}
+
 int fsocket_spawn(struct file *filp, int fd, int tcpu)
 {
 	int ret = 0, backlog;
@@ -1610,7 +1626,7 @@ int fsocket_spawn(struct file *filp, int fd, int tcpu)
 	struct sockaddr_in addr;
 	kernel_cap_t p;
 
-	DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d\n", fd, tcpu);
+	DPRINTK(INFO, "Listen spawn listen fd %d on CPU %d. filp->sub_file(%p)\n", fd, tcpu, filp->sub_file);
 
 	mutex_lock(&fastsocket_spawn_mutex);
 
@@ -1727,6 +1743,7 @@ int fsocket_accept(struct file *file , struct sockaddr __user *upeer_sockaddr,
 		fsocket_free_socket_mem((struct socket_alloc*)newsock);
 		goto out;
 	}
+	DPRINTK(DEBUG, "Accept newfile(%p) for newfd(%d)\n", newfile, newfd);
 
 	err = security_socket_accept(sock, newsock);
 	if (err) {	
