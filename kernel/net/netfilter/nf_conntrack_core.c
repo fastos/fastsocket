@@ -218,7 +218,8 @@ static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 {
 	struct nf_mem_pool *mem_pool = &__get_cpu_var(g_nf_mem_pool); 
 	struct nf_mem_node *mem_node = NULL; 
-	
+
+	preempt_disable();	
 	local_bh_disable(); 
 	if (mem_pool->free_cnt) {
 		mem_node = list_first_entry(&mem_pool->free_list, struct nf_mem_node, next);
@@ -227,6 +228,7 @@ static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 		mem_pool->alloc_to_free_list++;
 	}
 	local_bh_enable();
+	preempt_enable_no_resched();
 	
 	if (mem_node) {
 		return &mem_node->nf_conn;
@@ -285,12 +287,14 @@ static void nf_mem_pool_free(struct net *net, struct nf_conn *nf)
 			spin_unlock_bh(&mem_pool->backlog_lock); 			
 		}
 	} else { 
-		if (mem_node->cpu_id == cpu) { 
+		if (mem_node->cpu_id == cpu) {
+			preempt_disable();
 			local_bh_disable(); 
 			list_add(&mem_node->next, &mem_pool->free_list); 
 			mem_pool->free_cnt++; 
 			mem_pool->free_to_free_list++; 
-			local_bh_enable(); 
+			local_bh_enable();
+			preempt_enable_no_resched(); 
 		} else { 
 			spin_lock_bh(&mem_pool->backlog_lock); 
 			list_add(&mem_node->next, &mem_pool->backlog_list); 
