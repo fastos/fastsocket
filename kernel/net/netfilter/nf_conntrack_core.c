@@ -268,7 +268,7 @@ static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 	return NULL;
 }
 
-static void nf_mem_pool_free(struct net *net, struct nf_conn *nf)
+void nf_mem_pool_free(struct net *net, struct nf_conn *nf)
 {
 	struct nf_mem_node *mem_node = (struct nf_mem_node *)nf;
 	struct nf_mem_pool *mem_pool = &per_cpu(g_nf_mem_pool, mem_node->cpu_id);
@@ -847,7 +847,7 @@ void nf_conntrack_free(struct nf_conn *ct)
 	nf_ct_ext_destroy(ct);
 	atomic_dec(&net->ct.count);
 	nf_ct_ext_free(ct);
-	nf_mem_pool_free(net, ct);
+	call_rcu(&ct->rcu, nf_ct_free_rcu);
 	//kmem_cache_free(net->ct.nf_conntrack_cachep, ct);
 }
 EXPORT_SYMBOL_GPL(nf_conntrack_free);
@@ -1611,7 +1611,7 @@ static int nf_conntrack_init_net(struct net *net)
 
 	net->ct.nf_conntrack_mem_cachep = kmem_cache_create(net->ct.mslabname,
 							sizeof(struct nf_mem_node), 0,
-							SLAB_DESTROY_BY_RCU, NULL);
+							0, NULL);
 	if (!net->ct.nf_conntrack_mem_cachep) {
 		printk(KERN_ERR "Unable to create nf_conn mem slab cache\n");
 		goto err_mcache;
