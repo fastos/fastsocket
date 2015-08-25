@@ -301,16 +301,6 @@ static inline int nf_ct_is_untracked(const struct sk_buff *skb)
 	return (skb->nfct == &nf_conntrack_untracked.ct_general);
 }
 
-extern void nf_mem_pool_free(struct net *net, struct nf_conn *nf);
-static void nf_ct_free_rcu(struct rcu_head *rcu)
-{
-	struct nf_conn *ct = container_of(rcu, struct nf_conn, rcu);
-	struct net *net = nf_ct_net(ct);
-
-	nf_mem_pool_free(net, ct);
-}
-
-
 extern int nf_conntrack_set_hashsize(const char *val, struct kernel_param *kp);
 extern unsigned int nf_conntrack_htable_size;
 extern unsigned int nf_conntrack_max;
