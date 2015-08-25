@@ -840,6 +840,15 @@ struct nf_conn *nf_conntrack_alloc(struct net *net,
 }
 EXPORT_SYMBOL_GPL(nf_conntrack_alloc);
 
+extern void nf_mem_pool_free(struct net *net, struct nf_conn *nf);
+static void nf_ct_free_rcu(struct rcu_head *rcu)
+{
+    struct nf_conn *ct = container_of(rcu, struct nf_conn, rcu);
+    struct net *net = nf_ct_net(ct);
+
+    nf_mem_pool_free(net, ct);
+}
+
 void nf_conntrack_free(struct nf_conn *ct)
 {
 	struct net *net = nf_ct_net(ct);
