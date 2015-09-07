@@ -71,43 +71,33 @@ static unsigned int nf_conntrack_hash_rnd;
 static struct proc_dir_entry *g_nf_pool_info;
 
 #define NF_MEM_POOL_SIZE				(4096)
-#define NF_MEM_POOL_MAX_CNT				(16)
 
 struct nf_mem_pool {
 	struct list_head free_list;
-	struct list_head backlog_list;
-	spinlock_t backlog_lock;
 
 	u32 pool_size;
 	u32 free_cnt;
-	u32 backlog_cnt;
 
 	u32 alloc_to_free_list;
-	u32 alloc_from_backlog;
 	u32 alloc_from_cachep;
 	u32 alloc_failed;
 	u32 free_to_cachep;
 	u32 free_to_free_list;
-	u32 free_to_backlog;
 };
 
 
 struct nf_mem_node {
 	struct nf_conn nf_conn;
 	struct list_head next;
-	u32 cpu_id;
 };
 
 struct mem_pool_stats {
 	u32 cur_free_cnt;
-	u32 cur_backlog_cnt;
 	u64 alloc_from_free_list;
-	u64 alloc_from_backlog;
 	u64 alloc_from_cachep;
 	u64 alloc_failed;
 	u64 free_to_cachep;
 	u64 free_to_free_list;
-	u64 free_to_backlog;
 };
 
 static DEFINE_PER_CPU(struct nf_mem_pool, g_nf_mem_pool);
@@ -123,9 +113,6 @@ static void nf_mem_pool_exit(struct net *net)
 		list_for_each_entry_safe(pos, n, &mem_pool->free_list, next) {
 			kmem_cache_free(net->ct.nf_conntrack_mem_cachep, pos);
 		}
-		list_for_each_entry_safe(pos, n, &mem_pool->backlog_list, next) {
-			kmem_cache_free(net->ct.nf_conntrack_mem_cachep, pos);
-		}
 	}
 }
 
@@ -138,8 +125,6 @@ static int nf_mem_pool_init(struct net *net, u32 pool_size)
 		
 		memset(mem_pool, 0, sizeof(*mem_pool));
 		INIT_LIST_HEAD(&mem_pool->free_list);
-		INIT_LIST_HEAD(&mem_pool->backlog_list);
-		spin_lock_init(&mem_pool->backlog_lock);
 		mem_pool->pool_size = pool_size;
 	} 
 	
@@ -152,7 +137,6 @@ static int nf_mem_pool_init(struct net *net, u32 pool_size)
 			if (!mem_node) {
 				goto error;
 			} 
-			mem_node->cpu_id = cpu;
 			list_add(&mem_node->next, &mem_pool->free_list);
 			mem_pool->free_cnt++;
 		}
@@ -189,26 +173,19 @@ static int nf_mem_pool_stats_show(struct seq_file *s, void* v)
 		struct nf_mem_pool *mem_pool = &per_cpu(g_nf_mem_pool, i); 
 		
 		mem_pool_stats.cur_free_cnt += mem_pool->free_cnt; 
-		mem_pool_stats.cur_backlog_cnt += mem_pool->backlog_cnt; 
 		mem_pool_stats.alloc_from_free_list += mem_pool->alloc_to_free_list; 
-		mem_pool_stats.alloc_from_backlog += mem_pool->alloc_from_backlog; 
 		mem_pool_stats.alloc_from_cachep += mem_pool->alloc_from_cachep; 
 		mem_pool_stats.alloc_failed += mem_pool->alloc_failed;
 		mem_pool_stats.free_to_free_list += mem_pool->free_to_free_list; 
-		mem_pool_stats.free_to_backlog += mem_pool->free_to_backlog; 
 		mem_pool_stats.free_to_cachep += mem_pool->free_to_cachep; 
 	} 
 	
 	seq_printf(s, "    cur free cnt: %u    %lu    %lu\n", mem_pool_stats.cur_free_cnt, sizeof(struct nf_mem_node), 
 		sizeof(struct nf_mem_node)*mem_pool_stats.cur_free_cnt); 
-	seq_printf(s, "    cur backlog cnt: %u    %lu	%lu\n", mem_pool_stats.cur_backlog_cnt, sizeof(struct nf_mem_node), 
-		sizeof(struct nf_mem_node)*mem_pool_stats.cur_backlog_cnt); 
 	seq_printf(s, "    alloc from free list: %llu\n", mem_pool_stats.alloc_from_free_list); 
-	seq_printf(s, "    alloc from backlog list: %llu\n", mem_pool_stats.alloc_from_backlog);
 	seq_printf(s, "    alloc from cachep: %llu\n", mem_pool_stats.alloc_from_cachep);
 	seq_printf(s, "    alloc failed: %llu\n", mem_pool_stats.alloc_failed);
 	seq_printf(s, "    free to free list: %llu\n", mem_pool_stats.free_to_free_list); 
-	seq_printf(s, "    free to backlog: %llu\n", mem_pool_stats.free_to_backlog); 
 	seq_printf(s, "    free to cachep: %llu\n", mem_pool_stats.free_to_cachep); 
 
 	return 0;
@@ -233,34 +210,10 @@ static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 	if (mem_node) {
 		return &mem_node->nf_conn;
 	} else {
-		if (mem_pool->backlog_cnt) {
-			spin_lock_bh(&mem_pool->backlog_lock);
-			if (mem_pool->backlog_cnt) {
-				list_splice_init(&mem_pool->backlog_list, &mem_pool->free_list);
-				mem_pool->free_cnt = mem_pool->backlog_cnt;
-				mem_pool->backlog_cnt = 0;
-				mem_node = list_first_entry(&mem_pool->free_list, struct nf_mem_node, next);
-				list_del(&mem_node->next);
-				mem_pool->free_cnt--; 
-				mem_pool->alloc_from_backlog++;
-			} else if (mem_pool->free_cnt) {				
-				mem_node = list_first_entry(&mem_pool->free_list, struct nf_mem_node, next);
-				list_del(&mem_node->next);
-				mem_pool->free_cnt--;
-				mem_pool->alloc_to_free_list++;
-			}
-			spin_unlock_bh(&mem_pool->backlog_lock);			
-		}
-		
+		mem_node = kmem_cache_alloc(net->ct.nf_conntrack_mem_cachep, gfp_flags);
 		if (mem_node) {
+			mem_pool->alloc_from_cachep++;
 			return &mem_node->nf_conn;
-		} else {
-			mem_node = kmem_cache_alloc(net->ct.nf_conntrack_mem_cachep, gfp_flags);
-			if (mem_node) {
-				mem_node->cpu_id = smp_processor_id();
-				mem_pool->alloc_from_cachep++;
-				return &mem_node->nf_conn;
-			} 
 		} 
 	} 
 
@@ -271,37 +224,19 @@ static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 void nf_mem_pool_free(struct net *net, struct nf_conn *nf)
 {
 	struct nf_mem_node *mem_node = (struct nf_mem_node *)nf;
-	struct nf_mem_pool *mem_pool = &per_cpu(g_nf_mem_pool, mem_node->cpu_id);
-	int cpu = smp_processor_id();
+	struct nf_mem_pool *mem_pool = &__get_cpu_var(g_nf_mem_pool);
 	
-	if (mem_pool->free_cnt+mem_pool->backlog_cnt >= mem_pool->pool_size) {
+	if (mem_pool->free_cnt >= mem_pool->pool_size) {
 		kmem_cache_free(net->ct.nf_conntrack_mem_cachep, mem_node);
 		mem_pool->free_to_cachep++;		
-		if (mem_pool->backlog_cnt > NF_MEM_POOL_MAX_CNT) {
-			spin_lock_bh(&mem_pool->backlog_lock); 
-			if (mem_pool->backlog_cnt > NF_MEM_POOL_MAX_CNT) {				
-				list_splice_init(&mem_pool->backlog_list, &mem_pool->free_list);
-				mem_pool->free_cnt += mem_pool->backlog_cnt;
-				mem_pool->backlog_cnt = 0;
-			}
-			spin_unlock_bh(&mem_pool->backlog_lock); 			
-		}
 	} else { 
-		if (mem_node->cpu_id == cpu) {
-			preempt_disable();
-			local_bh_disable(); 
-			list_add(&mem_node->next, &mem_pool->free_list); 
-			mem_pool->free_cnt++; 
-			mem_pool->free_to_free_list++; 
-			local_bh_enable();
-			preempt_enable_no_resched(); 
-		} else { 
-			spin_lock_bh(&mem_pool->backlog_lock); 
-			list_add(&mem_node->next, &mem_pool->backlog_list); 
-			mem_pool->backlog_cnt++; 
-			mem_pool->free_to_backlog++; 
-			spin_unlock_bh(&mem_pool->backlog_lock); 
-		} 
+		preempt_disable();
+		local_bh_disable(); 
+		list_add(&mem_node->next, &mem_pool->free_list); 
+		mem_pool->free_cnt++; 
+		mem_pool->free_to_free_list++; 
+		local_bh_enable();
+		preempt_enable_no_resched(); 
 	} 
 }
 
