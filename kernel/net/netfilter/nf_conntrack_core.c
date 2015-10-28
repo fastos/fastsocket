@@ -193,51 +193,59 @@ static int nf_mem_pool_stats_show(struct seq_file *s, void* v)
 
 static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 {
-	struct nf_mem_pool *mem_pool = &__get_cpu_var(g_nf_mem_pool); 
+	struct nf_mem_pool *mem_pool; 
 	struct nf_mem_node *mem_node = NULL; 
 
 	preempt_disable();	
 	local_bh_disable(); 
-	if (mem_pool->free_cnt) {
+
+	mem_pool = &__get_cpu_var(g_nf_mem_pool);
+	if (!list_empty(&mem_pool->free_list)) {
 		mem_node = list_first_entry(&mem_pool->free_list, struct nf_mem_node, next);
 		list_del(&mem_node->next);
 		mem_pool->free_cnt--;
 		mem_pool->alloc_to_free_list++;
-	}
-	local_bh_enable();
-	preempt_enable_no_resched();
-	
-	if (mem_node) {
+		
+		local_bh_enable();
+		preempt_enable_no_resched();
 		return &mem_node->nf_conn;
-	} else {
-		mem_node = kmem_cache_alloc(net->ct.nf_conntrack_mem_cachep, gfp_flags);
-		if (mem_node) {
-			mem_pool->alloc_from_cachep++;
-			return &mem_node->nf_conn;
-		} 
+
+	}
+	
+	mem_node = kmem_cache_alloc(net->ct.nf_conntrack_mem_cachep, gfp_flags);
+	if (mem_node) {
+		mem_pool->alloc_from_cachep++;
+		local_bh_enable();
+		preempt_enable_no_resched();
+		return &mem_node->nf_conn;
 	} 
 
 	mem_pool->alloc_failed++;
+	local_bh_enable();
+	preempt_enable_no_resched();
 	return NULL;
 }
 
 void nf_mem_pool_free(struct net *net, struct nf_conn *nf)
 {
 	struct nf_mem_node *mem_node = (struct nf_mem_node *)nf;
-	struct nf_mem_pool *mem_pool = &__get_cpu_var(g_nf_mem_pool);
-	
+	struct nf_mem_pool *mem_pool;
+
+	preempt_disable();
+	local_bh_disable();
+
+	mem_pool = &__get_cpu_var(g_nf_mem_pool);	
 	if (mem_pool->free_cnt >= mem_pool->pool_size) {
 		kmem_cache_free(net->ct.nf_conntrack_mem_cachep, mem_node);
 		mem_pool->free_to_cachep++;		
 	} else { 
-		preempt_disable();
-		local_bh_disable(); 
 		list_add(&mem_node->next, &mem_pool->free_list); 
 		mem_pool->free_cnt++; 
 		mem_pool->free_to_free_list++; 
-		local_bh_enable();
-		preempt_enable_no_resched(); 
-	} 
+	}
+
+	local_bh_enable();
+	preempt_enable_no_resched();
 }
 
 
