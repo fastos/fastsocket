@@ -71,8 +71,9 @@ static unsigned int nf_conntrack_hash_rnd;
 static struct proc_dir_entry *g_nf_pool_info;
 
 #define NF_MEM_POOL_SIZE				(4096)
-
+#define NF_MEM_POOL_COOKIE				"NFPO"
 struct nf_mem_pool {
+	u32 cookie;
 	struct list_head free_list;
 
 	u32 pool_size;
@@ -92,6 +93,7 @@ struct nf_mem_node {
 };
 
 struct mem_pool_stats {
+	u32 not_init_cnt;
 	u32 cur_free_cnt;
 	u64 alloc_from_free_list;
 	u64 alloc_from_cachep;
@@ -106,7 +108,7 @@ static void nf_mem_pool_exit(struct net *net)
 {
 	u32 cpu; 
 	
-	for_each_online_cpu(cpu) { 
+	for_each_possible_cpu(cpu) { 
 		struct nf_mem_pool *mem_pool = &per_cpu(g_nf_mem_pool, cpu);
 		struct nf_mem_node *pos, *n; 
 		
@@ -120,15 +122,16 @@ static int nf_mem_pool_init(struct net *net, u32 pool_size)
 {	
 	u32 cpu, i; 
 	
-	for_each_online_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		struct nf_mem_pool *mem_pool = &per_cpu(g_nf_mem_pool, cpu);
 		
 		memset(mem_pool, 0, sizeof(*mem_pool));
 		INIT_LIST_HEAD(&mem_pool->free_list);
 		mem_pool->pool_size = pool_size;
+		mem_pool->cookie = *(u32*)NF_MEM_POOL_COOKIE;
 	} 
 	
-	for_each_online_cpu(cpu) {
+	for_each_possible_cpu(cpu) {
 		struct nf_mem_pool *mem_pool = &per_cpu(g_nf_mem_pool, cpu);
 		struct nf_mem_node *mem_node;
 		
@@ -169,8 +172,12 @@ static int nf_mem_pool_stats_show(struct seq_file *s, void* v)
 	u32 i; 
 	
 	memset(&mem_pool_stats, 0, sizeof(mem_pool_stats)); 
-	for_each_online_cpu(i) { 
+	for_each_possible_cpu(i) { 
 		struct nf_mem_pool *mem_pool = &per_cpu(g_nf_mem_pool, i); 
+
+		if (mem_pool->cookie != *(u32*)NF_MEM_POOL_COOKIE) {
+			mem_pool_stats.not_init_cnt++;
+		}
 		
 		mem_pool_stats.cur_free_cnt += mem_pool->free_cnt; 
 		mem_pool_stats.alloc_from_free_list += mem_pool->alloc_to_free_list; 
@@ -180,6 +187,7 @@ static int nf_mem_pool_stats_show(struct seq_file *s, void* v)
 		mem_pool_stats.free_to_cachep += mem_pool->free_to_cachep; 
 	} 
 	
+	seq_printf(s, "    not init cnt: %u\n", mem_pool_stats.not_init_cnt);
 	seq_printf(s, "    cur free cnt: %u    %lu    %lu\n", mem_pool_stats.cur_free_cnt, sizeof(struct nf_mem_node), 
 		sizeof(struct nf_mem_node)*mem_pool_stats.cur_free_cnt); 
 	seq_printf(s, "    alloc from free list: %llu\n", mem_pool_stats.alloc_from_free_list); 
@@ -200,7 +208,7 @@ static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 	local_bh_disable(); 
 
 	mem_pool = &__get_cpu_var(g_nf_mem_pool);
-	if (!list_empty(&mem_pool->free_list)) {
+	if (!list_empty(&mem_pool->free_list) && mem_pool->cookie == *(u32*)NF_MEM_POOL_COOKIE) {
 		mem_node = list_first_entry(&mem_pool->free_list, struct nf_mem_node, next);
 		list_del(&mem_node->next);
 		mem_pool->free_cnt--;
@@ -235,7 +243,7 @@ void nf_mem_pool_free(struct net *net, struct nf_conn *nf)
 	local_bh_disable();
 
 	mem_pool = &__get_cpu_var(g_nf_mem_pool);	
-	if (mem_pool->free_cnt >= mem_pool->pool_size) {
+	if (mem_pool->free_cnt >= mem_pool->pool_size || mem_pool->cookie != *(u32*)NF_MEM_POOL_COOKIE) {
 		kmem_cache_free(net->ct.nf_conntrack_mem_cachep, mem_node);
 		mem_pool->free_to_cachep++;		
 	} else { 
