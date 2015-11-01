@@ -208,6 +208,8 @@ static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 	local_bh_disable(); 
 
 	mem_pool = &__get_cpu_var(g_nf_mem_pool);
+
+#if 0
 	if (!list_empty(&mem_pool->free_list) && mem_pool->cookie == *(u32*)NF_MEM_POOL_COOKIE) {
 		mem_node = list_first_entry(&mem_pool->free_list, struct nf_mem_node, next);
 		list_del(&mem_node->next);
@@ -219,6 +221,7 @@ static struct nf_conn *nf_mem_pool_alloc(struct net *net, gfp_t gfp_flags)
 		return &mem_node->nf_conn;
 
 	}
+#endif
 	
 	mem_node = kmem_cache_alloc(net->ct.nf_conntrack_mem_cachep, gfp_flags);
 	if (mem_node) {
@@ -243,7 +246,7 @@ void nf_mem_pool_free(struct net *net, struct nf_conn *nf)
 	local_bh_disable();
 
 	mem_pool = &__get_cpu_var(g_nf_mem_pool);	
-	if (mem_pool->free_cnt >= mem_pool->pool_size || mem_pool->cookie != *(u32*)NF_MEM_POOL_COOKIE) {
+	if (1 || mem_pool->free_cnt >= mem_pool->pool_size || mem_pool->cookie != *(u32*)NF_MEM_POOL_COOKIE) {
 		kmem_cache_free(net->ct.nf_conntrack_mem_cachep, mem_node);
 		mem_pool->free_to_cachep++;		
 	} else { 
