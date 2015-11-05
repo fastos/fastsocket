@@ -136,7 +136,6 @@ struct nf_conn {
 	/* Extra storage reserved for other modules: */
 	struct nf_conntrack_proto_ext proto_ext;
 #endif
-	struct rcu_head rcu;
 };
 
 static inline struct nf_conn *
