@@ -3502,6 +3502,25 @@ int enable_receive_flow_deliver = 0;
 EXPORT_SYMBOL(enable_receive_flow_deliver);
 
 #if 0
+struct dst_entry *sk_dst_check_direct_tcp(struct sock *sk, u32 cookie)
+{
+    struct dst_entry *dst = sk->sk_rcv_dst ;
+
+    if(dst&&dst->obsolete&&dst->ops->check(dst, cookie)== NULL){
+
+        dst_release(dst);
+        sk->sk_rcv_dst = NULL;
+
+        if(dst->ops->check(dst, cookie) == NULL){
+            FPRINTK("Direct  TCP socket 0x%p has dst->ops->check(dst, cookie)== NULL \n", sk);
+        }
+
+        return NULL;
+    }
+
+    return dst;
+}
+
 static void netif_direct_tcp(struct sk_buff *skb)
 {
 	if (skb->protocol != htons(ETH_P_IP))
@@ -3524,7 +3543,7 @@ static void netif_direct_tcp(struct sk_buff *skb)
 			if (sk) {
 				if ((sk->sk_state != TCP_TIME_WAIT) && sock_flag(sk, SOCK_DIRECT_TCP)) {
 					FPRINTK("Skb 0x%p[:%u] hit DIRECT_TCP socket 0x%p[:%u]\n", skb, ntohs(th->dest), sk, inet_sk(sk)->num);
-					if(sk->sk_rcv_dst) {
+					if(sk->sk_rcv_dst && sk_dst_check_direct_tcp(sk, 0) != NULL) {
 						skb_dst_set(skb, sk->sk_rcv_dst);
 						skb->sock_dst = sk->sk_rcv_dst;
 						FPRINTK("Direct TCP socket 0x%p has dst record 0x%p[%u]\n", sk, sk->sk_rcv_dst, atomic_read(&sk->sk_rcv_dst->__refcnt));
