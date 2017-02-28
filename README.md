@@ -2,6 +2,7 @@
 ========================================================================
 
 ## TABLE OF CONTENT ##
+* [Paper](#paper)
 * [Introduction](#introduction)
 * [Participants](#participants)
 * [Installation](#installation)
@@ -18,6 +19,12 @@
   * [Online Evaluation](#online-evaluation)
 * [New Features](#new-features)
 * [Contacts](#contacts)
+
+## PAPER ##
+
+ASPLOS 2016
+
+http://dl.acm.org/citation.cfm?id=2872391
 
 ## INTRODUCTION ##
 
